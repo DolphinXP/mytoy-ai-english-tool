@@ -2,12 +2,17 @@ import os
 import tempfile
 import threading
 import queue
+import warnings
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import torch
 from PySide6.QtCore import Signal, QThread
+
+# Suppress tokenizer class mismatch warning - this is expected since 
+# VibeVoiceTextTokenizerFast extends Qwen2TokenizerFast
+warnings.filterwarnings('ignore', message='.*tokenizer class you load from this checkpoint is not the same type.*')
 
 # Add VibeVoice to path
 import sys

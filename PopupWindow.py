@@ -3,12 +3,49 @@ import time
 import queue
 import threading
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QTextBrowser,
     QPushButton, QProgressBar, QLabel, QSystemTrayIcon, QMenu, QApplication
 )
-from PySide6.QtCore import QTimer, QSettings, Qt as _Qt, Signal
-from PySide6.QtGui import QFont, QIcon, QAction
+from PySide6.QtCore import QTimer, QSettings, Qt as _Qt, Signal, QEvent
+from PySide6.QtGui import QFont, QIcon, QAction, QMouseEvent, QTextCursor
 import pygame
+
+try:
+    import markdown
+    HAS_MARKDOWN = True
+except ImportError:
+    HAS_MARKDOWN = False
+    print("Warning: markdown library not installed. Dictionary will show plain text.")
+
+
+class TranslatableTextEdit(QTextEdit):
+    """Custom QTextEdit that shows translate popup when text is selected"""
+    text_selected = Signal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._last_selection = ""
+        # Connect to selection changed
+        self.selectionChanged.connect(self._on_selection_changed)
+    
+    def _on_selection_changed(self):
+        """Handle selection change - emit signal when text is newly selected"""
+        cursor = self.textCursor()
+        selected_text = cursor.selectedText().strip()
+        
+        # Only emit if there's a new non-empty selection
+        if selected_text and selected_text != self._last_selection:
+            self._last_selection = selected_text
+            # Small delay to ensure selection is complete
+            QTimer.singleShot(100, self._emit_if_still_selected)
+        elif not selected_text:
+            self._last_selection = ""
+    
+    def _emit_if_still_selected(self):
+        """Emit signal if text is still selected"""
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            self.text_selected.emit()
 
 
 class StreamingAudioPlayer:
@@ -191,7 +228,7 @@ class PopupWindow(QWidget):
         corrected_label.setFont(title_font)
         layout.addWidget(corrected_label)
 
-        self.corrected_text_display = QTextEdit()
+        self.corrected_text_display = TranslatableTextEdit()
         self.corrected_text_display.setFont(QFont("Microsoft YaHei", 10))
         self.corrected_text_display.setPlainText("Correcting...")
         self.corrected_text_display.setReadOnly(True)
@@ -200,6 +237,9 @@ class PopupWindow(QWidget):
         self.corrected_text_display.setContextMenuPolicy(_Qt.CustomContextMenu)
         self.corrected_text_display.customContextMenuRequested.connect(
             lambda pos: self.show_context_menu(self.corrected_text_display, pos))
+        # Connect text selection signal for translation popup
+        self.corrected_text_display.text_selected.connect(
+            lambda: self.show_translate_menu_for_selection(self.corrected_text_display))
         layout.addWidget(self.corrected_text_display)
 
         # Translated text section
@@ -207,7 +247,7 @@ class PopupWindow(QWidget):
         translated_label.setFont(title_font)
         layout.addWidget(translated_label)
 
-        self.translated_text_display = QTextEdit()
+        self.translated_text_display = TranslatableTextEdit()
         self.translated_text_display.setFont(QFont("Microsoft YaHei", 10))
         self.translated_text_display.setPlainText("Translating...")
         self.translated_text_display.setReadOnly(True)
@@ -216,25 +256,31 @@ class PopupWindow(QWidget):
         self.translated_text_display.setContextMenuPolicy(_Qt.CustomContextMenu)
         self.translated_text_display.customContextMenuRequested.connect(
             lambda pos: self.show_context_menu(self.translated_text_display, pos))
+        # Connect text selection signal for translation popup
+        self.translated_text_display.text_selected.connect(
+            lambda: self.show_translate_menu_for_selection(self.translated_text_display))
         layout.addWidget(self.translated_text_display)
 
         # Quick Dictionary section (replaces English Text for TTS)
-        dictionary_label = QLabel("📖 Quick Dictionary (select text above, right-click → Translate):")
+        dictionary_label = QLabel("📖 Quick Dictionary (select text above → popup menu → Translate):")
         dictionary_label.setFont(title_font)
         layout.addWidget(dictionary_label)
 
-        self.dictionary_display = QTextEdit()
+        # Use QTextBrowser for markdown rendering
+        self.dictionary_display = QTextBrowser()
         self.dictionary_display.setFont(QFont("Microsoft YaHei", 10))
-        self.dictionary_display.setPlainText("Select text in Corrected or Translated sections, then right-click and choose 'Translate' to see the definition here.")
-        self.dictionary_display.setReadOnly(True)
+        self.dictionary_display.setPlainText("Double-click a word, or select text in Corrected/Translated sections, then right-click and choose 'Translate' to see the definition here.")
+        self.dictionary_display.setOpenExternalLinks(True)
         self.dictionary_display.setStyleSheet("""
-            QTextEdit {
+            QTextBrowser {
                 background-color: #f8f9fa;
                 border: 1px solid #dee2e6;
                 border-radius: 5px;
-                padding: 5px;
+                padding: 8px;
             }
         """)
+        # Store raw markdown for updates
+        self._dictionary_markdown = ""
         layout.addWidget(self.dictionary_display)
 
         # Status label
@@ -313,6 +359,21 @@ class PopupWindow(QWidget):
         """Called when window is resized - save size"""
         super().resizeEvent(event)
         self.save_position()
+
+    def show_translate_menu_for_selection(self, text_edit):
+        """Show translate menu at cursor position for the selected word"""
+        cursor = text_edit.textCursor()
+        if cursor.hasSelection():
+            # Get cursor position in global coordinates
+            cursor_rect = text_edit.cursorRect(cursor)
+            global_pos = text_edit.mapToGlobal(cursor_rect.bottomRight())
+            
+            # Create a mini menu with just translate option
+            menu = QMenu(self)
+            translate_action = QAction("🔍 Translate to Dictionary", self)
+            translate_action.triggered.connect(lambda: self.translate_selected(text_edit))
+            menu.addAction(translate_action)
+            menu.exec(global_pos)
 
     def setup_auto_close_timer(self):
         """Setup timer for auto-close after 360 seconds"""
@@ -402,6 +463,7 @@ class PopupWindow(QWidget):
         full_text = text_edit.toPlainText()
         
         # Show loading state
+        self._dictionary_markdown = ""
         self.dictionary_display.setPlainText(f"🔄 Translating: {selected_text}...")
         
         # Start dictionary translation thread
@@ -413,15 +475,45 @@ class PopupWindow(QWidget):
 
     def on_dictionary_chunk(self, chunk):
         """Handle streaming dictionary chunk"""
-        current_text = self.dictionary_display.toPlainText()
-        if current_text.startswith("🔄 Translating:"):
-            current_text = ""
-        self.dictionary_display.setPlainText(current_text + chunk)
+        # Accumulate markdown
+        if self._dictionary_markdown == "" and self.dictionary_display.toPlainText().startswith("🔄 Translating:"):
+            self._dictionary_markdown = ""
+        
+        self._dictionary_markdown += chunk
+        
+        # Render markdown to HTML
+        self.update_dictionary_display()
+
+    def update_dictionary_display(self):
+        """Update dictionary display with rendered markdown"""
+        if HAS_MARKDOWN:
+            # Convert markdown to HTML with extensions
+            html_content = markdown.markdown(
+                self._dictionary_markdown,
+                extensions=['extra', 'nl2br', 'sane_lists']
+            )
+            # Add some base styling
+            styled_html = f"""
+            <style>
+                body {{ font-family: 'Microsoft YaHei', sans-serif; line-height: 1.6; }}
+                h1, h2, h3 {{ color: #333; margin-top: 10px; }}
+                strong {{ color: #0066cc; }}
+                code {{ background-color: #e9ecef; padding: 2px 5px; border-radius: 3px; }}
+                ul, ol {{ margin-left: 20px; }}
+                p {{ margin: 5px 0; }}
+            </style>
+            {html_content}
+            """
+            self.dictionary_display.setHtml(styled_html)
+        else:
+            # Fallback to plain text
+            self.dictionary_display.setPlainText(self._dictionary_markdown)
 
     def on_dictionary_done(self, result):
         """Handle dictionary translation completion"""
-        # Result is already displayed via chunks
-        pass
+        # Final update with complete markdown
+        if self._dictionary_markdown:
+            self.update_dictionary_display()
 
     def set_status(self, status):
         """Update status label"""
