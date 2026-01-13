@@ -1,4 +1,5 @@
 import os
+import tempfile
 import time
 import queue
 import threading
@@ -142,6 +143,8 @@ class StreamingAudioPlayer:
 class PopupWindow(QWidget):
     # Signal to request full application exit
     exit_app_requested = Signal()
+    # Signal emitted when popup is being destroyed
+    popup_destroyed = Signal()
     
     def __init__(self, original_text, parent=None):
         super().__init__(parent)
@@ -810,6 +813,9 @@ class PopupWindow(QWidget):
 
     def closeEvent(self, event):
         """Handle window close event"""
+        # Emit destroyed signal before cleanup
+        self.popup_destroyed.emit()
+
         # Save position before closing
         self.save_position()
 
@@ -826,6 +832,24 @@ class PopupWindow(QWidget):
             self.auto_close_timer.stop()
         if hasattr(self, 'progress_timer'):
             self.progress_timer.stop()
+
+        # Stop and wait for dictionary thread to finish
+        if self.dictionary_thread and self.dictionary_thread.isRunning():
+            print("Waiting for dictionary thread to finish...")
+            # Disconnect signals to prevent updates after close
+            try:
+                self.dictionary_thread.translation_chunk.disconnect()
+                self.dictionary_thread.translation_done.disconnect()
+            except:
+                pass
+            # Request thread to stop gracefully
+            self.dictionary_thread.stop()
+            # Wait for thread to finish (with timeout)
+            if not self.dictionary_thread.wait(1000):  # 1 second timeout
+                print("Dictionary thread did not finish in time, terminating...")
+                self.dictionary_thread.terminate()
+                self.dictionary_thread.wait(500)
+            self.dictionary_thread = None
 
         # Clean up temporary audio file
         if self.audio_file_path and os.path.exists(self.audio_file_path):

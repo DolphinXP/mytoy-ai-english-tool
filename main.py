@@ -321,6 +321,7 @@ class MainApp(QObject):
         # Create new popup window
         self.popup_window = PopupWindow(original_text)
         self.popup_window.exit_app_requested.connect(self.exit_app)
+        self.popup_window.popup_destroyed.connect(self.on_popup_destroyed)
         self.popup_window.show()
 
         # Initialize model manager if not already done
@@ -482,6 +483,21 @@ class MainApp(QObject):
         msg_box.setWindowFlags(msg_box.windowFlags() |
                                msg_box.windowFlags().__class__.WindowStaysOnTopHint)
         msg_box.exec()
+
+    def on_popup_destroyed(self):
+        """Handle popup window destruction - disconnect TTS signals"""
+        print("Popup window destroyed, disconnecting TTS signals")
+        # Disconnect TTS thread signals to prevent updates to destroyed widget
+        if self.tts_thread is not None:
+            try:
+                self.tts_thread.tts_completed.disconnect(self.on_tts_completed)
+                self.tts_thread.tts_error.disconnect(self.on_tts_error)
+                self.tts_thread.progress_update.disconnect(self.on_tts_progress)
+                self.tts_thread.audio_chunk_ready.disconnect(self.on_audio_chunk_ready)
+            except:
+                pass
+        # Clear popup reference
+        self.popup_window = None
 
     def exit_app(self):
         print("Exiting application...")
