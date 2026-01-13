@@ -1,5 +1,7 @@
 import os
 import time
+import queue
+import threading
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
     QPushButton, QProgressBar, QLabel, QSystemTrayIcon, QMenu, QApplication
@@ -7,6 +9,95 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QTimer, QSettings, Qt as _Qt
 from PySide6.QtGui import QFont, QIcon
 import pygame
+
+
+class StreamingAudioPlayer:
+    """Real-time audio streaming player using pyaudio"""
+    
+    def __init__(self, sample_rate=24000, channels=1, sample_width=2):
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self.sample_width = sample_width  # 2 bytes for 16-bit audio
+        self.audio_queue = queue.Queue()
+        self.is_playing = False
+        self.stop_event = threading.Event()
+        self.playback_thread = None
+        self.total_bytes_played = 0
+        self.pyaudio_instance = None
+        self.stream = None
+        
+    def start(self):
+        """Start the streaming playback"""
+        if self.is_playing:
+            return
+        
+        self.stop_event.clear()
+        self.is_playing = True
+        self.total_bytes_played = 0
+        self.playback_thread = threading.Thread(target=self._playback_loop, daemon=True)
+        self.playback_thread.start()
+        
+    def add_audio_chunk(self, audio_bytes):
+        """Add an audio chunk to the playback queue"""
+        if self.is_playing:
+            self.audio_queue.put(audio_bytes)
+            
+    def stop(self):
+        """Stop the streaming playback"""
+        self.stop_event.set()
+        self.is_playing = False
+        
+        # Clear the queue
+        while not self.audio_queue.empty():
+            try:
+                self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+                
+        if self.playback_thread and self.playback_thread.is_alive():
+            self.playback_thread.join(timeout=1.0)
+            
+    def _playback_loop(self):
+        """Main playback loop running in a separate thread"""
+        try:
+            import pyaudio
+            self.pyaudio_instance = pyaudio.PyAudio()
+            
+            self.stream = self.pyaudio_instance.open(
+                format=pyaudio.paInt16,
+                channels=self.channels,
+                rate=self.sample_rate,
+                output=True,
+                frames_per_buffer=1024
+            )
+            
+            while not self.stop_event.is_set():
+                try:
+                    # Get audio data with timeout
+                    audio_data = self.audio_queue.get(timeout=0.1)
+                    self.stream.write(audio_data)
+                    self.total_bytes_played += len(audio_data)
+                except queue.Empty:
+                    continue
+                    
+        except ImportError:
+            print("pyaudio not installed, falling back to non-streaming playback")
+        except Exception as e:
+            print(f"Streaming playback error: {e}")
+        finally:
+            if self.stream:
+                self.stream.stop_stream()
+                self.stream.close()
+            if self.pyaudio_instance:
+                self.pyaudio_instance.terminate()
+            self.stream = None
+            self.pyaudio_instance = None
+            
+    def get_current_position(self):
+        """Get current playback position in seconds"""
+        bytes_per_sample = self.sample_width * self.channels
+        samples_played = self.total_bytes_played / bytes_per_sample
+        return samples_played / self.sample_rate
 
 
 class PopupWindow(QWidget):
@@ -21,11 +112,16 @@ class PopupWindow(QWidget):
         self.audio_file_path = None
         self.audio_length = 0
         self.current_position = 0
+        
+        # Streaming audio player
+        self.streaming_player = None
+        self.is_streaming = False
+        self.streaming_chunks_received = 0
 
         # Settings for position memory
         self.settings = QSettings('AI-TTS-App', 'PopupWindow')
 
-        # Initialize pygame mixer
+        # Initialize pygame mixer (for file-based playback fallback)
         try:
             pygame.mixer.init()
         except:
@@ -225,9 +321,54 @@ class PopupWindow(QWidget):
         """Update status label"""
         self.status_label.setText(status)
 
+    # --- Streaming Audio Methods ---
+    
+    def start_streaming_playback(self):
+        """Initialize streaming audio playback"""
+        self.is_streaming = True
+        self.streaming_chunks_received = 0
+        self.streaming_player = StreamingAudioPlayer(sample_rate=24000)
+        self.streaming_player.start()
+        self.is_playing = True
+        self.play_stop_btn.setText("⏸ Stop")
+        self.play_stop_btn.setEnabled(True)
+        self.progress_timer.start(100)
+        self.set_status("🔊 Streaming audio...")
+        print("Streaming playback started")
+        
+    def on_audio_chunk_ready(self, audio_bytes, sample_rate):
+        """Handle incoming audio chunk for streaming playback"""
+        if not self.is_streaming:
+            self.start_streaming_playback()
+            
+        self.streaming_chunks_received += 1
+        
+        if self.streaming_player:
+            self.streaming_player.add_audio_chunk(audio_bytes)
+            
+        # Update status with chunk count
+        self.set_status(f"🔊 Streaming audio... ({self.streaming_chunks_received} chunks)")
+        
+    def stop_streaming_playback(self):
+        """Stop streaming audio playback"""
+        if self.streaming_player:
+            self.streaming_player.stop()
+            self.streaming_player = None
+        self.is_streaming = False
+        self.is_playing = False
+        self.play_stop_btn.setText("▶ Play English Audio")
+        self.progress_timer.stop()
+        print("Streaming playback stopped")
+
+    # --- File-based Audio Methods ---
+
     def set_audio_ready(self, audio_file_path, duration=None):
         """Called when audio is ready for playback"""
         self.audio_file_path = audio_file_path
+        
+        # Stop streaming if it was active
+        if self.is_streaming:
+            self.stop_streaming_playback()
 
         # Get actual audio length
         self.audio_length = self.get_audio_length(audio_file_path)
@@ -239,13 +380,18 @@ class PopupWindow(QWidget):
         self.play_stop_btn.setEnabled(True)
         self.update_time_display()
 
-        # Auto-start playback
-        self.start_playback()
+        # Auto-start playback if not already playing via streaming
+        if not self.is_playing:
+            self.start_playback()
 
     def set_audio_error(self, error_message):
         """Called when audio generation fails"""
         self.status_label.setText(f"❌ Audio error: {error_message}")
         self.play_stop_btn.setEnabled(False)
+        
+        # Stop streaming if it was active
+        if self.is_streaming:
+            self.stop_streaming_playback()
 
     def get_audio_length(self, audio_file_path):
         """Get the actual length of the audio file"""
@@ -259,7 +405,9 @@ class PopupWindow(QWidget):
 
     def toggle_playback(self):
         """Toggle between play and stop"""
-        if not self.is_playing:
+        if self.is_streaming:
+            self.stop_streaming_playback()
+        elif not self.is_playing:
             self.start_playback()
         else:
             self.stop_playback()
@@ -308,12 +456,23 @@ class PopupWindow(QWidget):
 
     def update_progress(self):
         """Update progress bar and time display based on actual playback"""
-        if self.is_playing and pygame.mixer.music.get_busy():
+        if self.is_streaming and self.streaming_player:
+            # Update based on streaming position
+            self.current_position = self.streaming_player.get_current_position()
+            # For streaming, we don't know total length, so just show current time
+            current_seconds = int(self.current_position)
+            current_time = f"{current_seconds//60:02d}:{current_seconds % 60:02d}"
+            self.time_label.setText(f"{current_time} / --:--")
+            # Progress bar in indeterminate mode for streaming
+            self.progress_bar.setMaximum(0)  # Indeterminate
+            
+        elif self.is_playing and pygame.mixer.music.get_busy():
             # Audio is still playing
             self.current_position += 0.1  # Increment by 100ms
 
             # Calculate progress percentage
             if self.audio_length > 0:
+                self.progress_bar.setMaximum(100)
                 progress_percent = min(
                     100, (self.current_position / self.audio_length) * 100)
                 self.progress_bar.setValue(int(progress_percent))
@@ -339,6 +498,10 @@ class PopupWindow(QWidget):
         """Handle window close event"""
         # Save position before closing
         self.save_position()
+
+        # Stop streaming playback
+        if self.is_streaming:
+            self.stop_streaming_playback()
 
         # Stop audio playback
         if self.is_playing:

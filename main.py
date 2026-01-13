@@ -270,16 +270,19 @@ class MainApp(QObject):
 
         self.translation_thread = None
 
-        # Start TTS thread
+        # Start TTS thread with streaming enabled
         try:
             self.tts_thread = self.vibevoice_manager.create_tts_thread(
                 text=english_for_tts,
                 model_path="microsoft/VibeVoice-Realtime-0.5B",
-                device="cuda"
+                device="cuda",
+                streaming=True  # Enable streaming for real-time playback
             )
             self.tts_thread.tts_completed.connect(self.on_tts_completed)
             self.tts_thread.tts_error.connect(self.on_tts_error)
             self.tts_thread.progress_update.connect(self.on_tts_progress)
+            # Connect audio chunk signal for real-time streaming playback
+            self.tts_thread.audio_chunk_ready.connect(self.on_audio_chunk_ready)
             self.tts_thread.start()
         except Exception as e:
             print(f"Failed to start TTS: {e}")
@@ -299,6 +302,11 @@ class MainApp(QObject):
         print(f"TTS Progress: {message}")
         if self.popup_window:
             self.popup_window.set_status(message)
+
+    def on_audio_chunk_ready(self, audio_bytes, sample_rate):
+        """Handle streaming audio chunk - forward to popup window for real-time playback"""
+        if self.popup_window:
+            self.popup_window.on_audio_chunk_ready(audio_bytes, sample_rate)
 
     def on_tts_error(self, error_message):
         """Handle TTS error"""

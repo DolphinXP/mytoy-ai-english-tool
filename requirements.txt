@@ -9,6 +9,7 @@ pynput>=1.7.6
 
 # Audio playback
 pygame>=2.5.0
+pyaudio>=0.2.14  # For real-time streaming audio playback
 
 # Windows clipboard access
 pywin32>=306

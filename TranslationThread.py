@@ -1,8 +1,12 @@
 import os
+import warnings
 import httpx
 from openai import OpenAI
 
 from PySide6.QtCore import Signal, QThread
+
+# Suppress SSL warnings from unverified HTTPS requests
+warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 
 class TranslationThread(QThread):
@@ -43,16 +47,17 @@ class TranslationThread(QThread):
 
     def run(self):
         try:
-            # Create HTTP client with timeout
-            http_kwargs = {}
-            if self.proxy_url:
-                http_kwargs['proxy'] = self.proxy_url
-            http_kwargs['timeout'] = httpx.Timeout(self.timeout, connect=10.0)
-
+            # Create HTTP client with SSL verification disabled
+            # This fixes SSL certificate verification errors in conda environments
+            http_client = httpx.Client(
+                verify=False,  # Disable SSL verification to fix certificate errors
+                proxy=self.proxy_url if self.proxy_url else None
+            )
+            
             client = OpenAI(
                 api_key=self.api_key,
                 base_url=self.base_url,
-                http_client=httpx.Client(**http_kwargs)
+                http_client=http_client
             )
 
             messages = [

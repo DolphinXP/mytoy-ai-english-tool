@@ -1,6 +1,7 @@
 import os
 import tempfile
 import threading
+import queue
 from pathlib import Path
 from typing import Optional
 
@@ -28,8 +29,9 @@ class VibeVoiceTTS(QThread):
     tts_completed = Signal(str)  # Signal to emit audio file path
     tts_error = Signal(str)  # Signal for error messages
     progress_update = Signal(str)  # Signal for progress updates
+    audio_chunk_ready = Signal(bytes, int)  # Signal for streaming: (audio_bytes, sample_rate)
 
-    def __init__(self, text, model_path="microsoft/VibeVoice-Realtime-0.5B", device="cuda", voice_preset="en-Carter_man"):
+    def __init__(self, text, model_path="microsoft/VibeVoice-Realtime-0.5B", device="cuda", voice_preset="en-Carter_man", streaming=False):
         super().__init__()
         self.text = text
         self.model_path = model_path
@@ -37,6 +39,7 @@ class VibeVoiceTTS(QThread):
         self.voice_preset = voice_preset
         self.sample_rate = 24_000
         self.inference_steps = 5
+        self.streaming = streaming  # Enable/disable streaming mode
 
         # Model components (loaded lazily)
         self._processor = None
@@ -166,8 +169,109 @@ class VibeVoiceTTS(QThread):
         }
         return prepared
 
+    def _convert_chunk_to_bytes(self, audio_chunk):
+        """Convert audio chunk to 16-bit PCM bytes for streaming playback"""
+        if torch.is_tensor(audio_chunk):
+            audio_chunk = audio_chunk.detach().cpu().to(torch.float32).numpy()
+        else:
+            audio_chunk = np.asarray(audio_chunk, dtype=np.float32)
+
+        if audio_chunk.ndim > 1:
+            audio_chunk = audio_chunk.reshape(-1)
+
+        # Normalize if needed
+        peak = np.max(np.abs(audio_chunk)) if audio_chunk.size else 0.0
+        if peak > 1.0:
+            audio_chunk = audio_chunk / peak
+
+        # Convert to 16-bit PCM
+        audio_int16 = (audio_chunk * 32767).astype(np.int16)
+        return audio_int16.tobytes()
+
+    def _generate_audio_streaming(self, text, voice_key=None):
+        """Generate audio from text with streaming output"""
+        # Get voice resources
+        prefilled_outputs = self._get_voice_resources(voice_key)
+
+        # Prepare inputs
+        text = text.replace("'", "'")
+        inputs = self._prepare_inputs(text, prefilled_outputs)
+
+        # Create audio streamer
+        audio_streamer = AudioStreamer(batch_size=1, stop_signal=None, timeout=None)
+        errors = []
+        stop_event = threading.Event()
+        audio_chunks = []
+
+        # Generation function for thread
+        def run_generation():
+            try:
+                self._model.generate(
+                    **inputs,
+                    max_new_tokens=None,
+                    cfg_scale=1.5,
+                    tokenizer=self._processor.tokenizer,
+                    generation_config={
+                        "do_sample": False,
+                    },
+                    audio_streamer=audio_streamer,
+                    stop_check_fn=stop_event.is_set,
+                    verbose=False,
+                    refresh_negative=True,
+                    all_prefilled_outputs=copy.deepcopy(prefilled_outputs),
+                )
+            except Exception as exc:
+                errors.append(exc)
+                audio_streamer.end()
+
+        # Start generation in background thread
+        thread = threading.Thread(target=run_generation, daemon=True)
+        thread.start()
+
+        # Stream audio chunks
+        try:
+            stream = audio_streamer.get_stream(0)
+            for audio_chunk in stream:
+                if torch.is_tensor(audio_chunk):
+                    audio_chunk = audio_chunk.detach().cpu().to(torch.float32).numpy()
+                else:
+                    audio_chunk = np.asarray(audio_chunk, dtype=np.float32)
+
+                if audio_chunk.ndim > 1:
+                    audio_chunk = audio_chunk.reshape(-1)
+
+                peak = np.max(np.abs(audio_chunk)) if audio_chunk.size else 0.0
+                if peak > 1.0:
+                    audio_chunk = audio_chunk / peak
+
+                audio_chunk = audio_chunk.astype(np.float32)
+                audio_chunks.append(audio_chunk)
+
+                # Emit chunk for streaming playback
+                if self.streaming:
+                    audio_bytes = self._convert_chunk_to_bytes(audio_chunk)
+                    self.audio_chunk_ready.emit(audio_bytes, self.sample_rate)
+
+        finally:
+            stop_event.set()
+            audio_streamer.end()
+            thread.join()
+
+        if errors:
+            raise errors[0]
+
+        # Concatenate all chunks for file saving
+        if audio_chunks:
+            full_audio = np.concatenate(audio_chunks)
+            return full_audio
+        return np.array([], dtype=np.float32)
+
     def _generate_audio(self, text, voice_key=None):
-        """Generate audio from text"""
+        """Generate audio from text (non-streaming, for backward compatibility)"""
+        if self.streaming:
+            return self._generate_audio_streaming(text, voice_key)
+
+        # Original non-streaming implementation
         # Get voice resources
         prefilled_outputs = self._get_voice_resources(voice_key)
 
@@ -308,13 +412,13 @@ class VibeVoiceModelManager:
             self._tts_instance._load_model()
         return self._tts_instance
 
-    def create_tts_thread(self, text, model_path="microsoft/VibeVoice-Realtime-0.5B", device="cuda"):
+    def create_tts_thread(self, text, model_path="microsoft/VibeVoice-Realtime-0.5B", device="cuda", streaming=False):
         """Create a new TTS thread that reuses the loaded model"""
         if self._tts_instance is None or not self._tts_instance._model_loaded:
             self.get_tts_instance(model_path, device)
 
         # Create new thread instance but share model components
-        thread = VibeVoiceTTS(text, model_path, device)
+        thread = VibeVoiceTTS(text, model_path, device, streaming=streaming)
         thread._processor = self._tts_instance._processor
         thread._model = self._tts_instance._model
         thread._voice_cache = self._tts_instance._voice_cache
