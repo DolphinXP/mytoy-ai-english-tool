@@ -279,7 +279,8 @@ class PopupWindow(QWidget):
         self.dictionary_display.setOpenExternalLinks(True)
         self.dictionary_display.setStyleSheet("""
             QTextBrowser {
-                background-color: #f8f9fa;
+                background-color: white;
+                color: black;
                 border: 1px solid #dee2e6;
                 border-radius: 5px;
                 padding: 8px;
@@ -553,12 +554,29 @@ class PopupWindow(QWidget):
         # Update status with chunk count
         self.set_status(f"🔊 Streaming audio... ({self.streaming_chunks_received} chunks)")
         
-    def stop_streaming_playback(self):
-        """Stop streaming audio playback and save final position"""
+    def stop_streaming_playback(self, wait_for_completion=False):
+        """Stop streaming audio playback and save final position
+
+        Args:
+            wait_for_completion: If True, wait for queued audio to finish playing
+        """
         if self.streaming_player:
+            if wait_for_completion:
+                # Wait for the audio queue to empty (play all queued audio)
+                import time
+                timeout = 5  # Maximum wait time in seconds
+                start_time = time.time()
+                while not self.streaming_player.audio_queue.empty():
+                    if time.time() - start_time > timeout:
+                        print(f"Timeout waiting for audio queue to empty")
+                        break
+                    time.sleep(0.1)
+
             # Save the position where streaming ended
+            # Get position before stopping to ensure we capture the actual played position
             self.streaming_position_at_end = self.streaming_player.get_current_position()
             print(f"Streaming ended at position: {self.streaming_position_at_end:.2f} seconds")
+            print(f"Total bytes played by streaming player: {self.streaming_player.total_bytes_played}")
             self.streaming_player.stop()
             self.streaming_player = None
         self.is_streaming = False
@@ -574,8 +592,10 @@ class PopupWindow(QWidget):
         self.audio_file_path = audio_file_path
 
         # Stop streaming if it was active (this saves streaming_position_at_end)
+        # Wait for all queued audio to finish playing before stopping
         if self.is_streaming:
-            self.stop_streaming_playback()
+            print("Waiting for streaming playback to complete...")
+            self.stop_streaming_playback(wait_for_completion=True)
 
         # Get actual audio length
         self.audio_length = self.get_audio_length(audio_file_path)
@@ -588,10 +608,12 @@ class PopupWindow(QWidget):
         self.update_time_display()
 
         # Auto-start playback from streaming position if we have one
-        if not self.is_playing and self.streaming_position_at_end > 0:
+        print(f"Checking resume conditions: is_playing={self.is_playing}, streaming_position_at_end={self.streaming_position_at_end:.2f}")
+        if not self.is_playing and self.streaming_position_at_end >= 0.1:
             print(f"Resuming playback from {self.streaming_position_at_end:.2f} seconds")
             self.start_playback_from_position(self.streaming_position_at_end)
         elif not self.is_playing:
+            print("Starting playback from beginning")
             self.start_playback()
 
     def set_audio_error(self, error_message):
