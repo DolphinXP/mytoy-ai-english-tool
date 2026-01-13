@@ -21,6 +21,8 @@ httpx>=0.25.0
 # Markdown rendering for Quick Dictionary
 markdown>=3.5.0
 
+websocket-client>=1.7.0  # For WebSocket connections
+
 # Note: VibeVoice and its dependencies (torch, transformers, numpy)
 # should already be installed in your environment.
 # If not, you may need to install:

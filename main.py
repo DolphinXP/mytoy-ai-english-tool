@@ -2,7 +2,9 @@ import sys
 import time
 import re
 
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
+from PySide6.QtWidgets import (QApplication, QSystemTrayIcon, QMenu, QMessageBox,
+                               QDialog, QVBoxLayout, QRadioButton, QPushButton,
+                               QLineEdit, QLabel, QDialogButtonBox)
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QIcon, QPixmap
 
@@ -12,6 +14,94 @@ from ClipboardCapture import ClipboardCapture
 from TextCorrectionThread import TextCorrectionThread
 from TranslationThread import TranslationThread
 from VibeVoiceTTS import VibeVoiceModelManager
+from VibeVoiceTTSRemote import VibeVoiceTTSRemoteManager
+
+
+class TTSServerSelectionDialog(QDialog):
+    """Dialog for selecting TTS server (local or remote)"""
+
+    def __init__(self, current_server_type="remote", current_remote_url="ws://10.110.31.157:3000/stream", parent=None):
+        super().__init__(parent)
+        self.current_server_type = current_server_type
+        self.current_remote_url = current_remote_url
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("TTS Server Selection")
+        self.setMinimumWidth(400)
+
+        layout = QVBoxLayout()
+
+        # Title
+        title_label = QLabel("Select TTS Server:")
+        title_font = title_label.font()
+        title_font.setBold(True)
+        title_font.setPointSize(11)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+
+        # Remote server radio button (default)
+        self.remote_radio = QRadioButton("Remote Server (recommended)")
+        self.remote_radio.setChecked(self.current_server_type == "remote")
+        self.remote_radio.toggled.connect(self.on_server_type_changed)
+        layout.addWidget(self.remote_radio)
+
+        # Remote server URL input
+        url_layout = QVBoxLayout()
+        url_label = QLabel("Remote Server URL:")
+        url_layout.addWidget(url_label)
+
+        self.remote_url_input = QLineEdit(self.current_remote_url)
+        self.remote_url_input.setEnabled(self.current_server_type == "remote")
+        url_layout.addWidget(self.remote_url_input)
+
+        # Add indent for URL input
+        from PySide6.QtWidgets import QSpacerItem
+        url_layout.addSpacerItem(QSpacerItem(20, 10))
+        layout.addLayout(url_layout)
+
+        # Local server radio button
+        self.local_radio = QRadioButton("Local Server (requires GPU)")
+        self.local_radio.setChecked(self.current_server_type == "local")
+        self.local_radio.toggled.connect(self.on_server_type_changed)
+        layout.addWidget(self.local_radio)
+
+        # Info text
+        info_label = QLabel("\nInfo:")
+        info_font = info_label.font()
+        info_font.setBold(True)
+        info_label.setFont(info_font)
+        layout.addWidget(info_label)
+
+        info_text = QLabel()
+        info_text.setWordWrap(True)
+        info_text.setText(
+            "• Remote: Uses a remote WebSocket server for TTS (faster, no GPU required)\n"
+            "• Local: Runs TTS locally on your machine (requires GPU with CUDA support)"
+        )
+        info_text.setStyleSheet("color: #666; padding: 5px;")
+        layout.addWidget(info_text)
+
+        # Buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self.setLayout(layout)
+
+    def on_server_type_changed(self):
+        """Handle server type radio button change"""
+        is_remote = self.remote_radio.isChecked()
+        self.remote_url_input.setEnabled(is_remote)
+
+    def get_server_config(self):
+        """Get the selected server configuration"""
+        server_type = "remote" if self.remote_radio.isChecked() else "local"
+        remote_url = self.remote_url_input.text().strip()
+        return server_type, remote_url
 
 
 class MainApp(QObject):
@@ -29,8 +119,16 @@ class MainApp(QObject):
         # Current popup window
         self.popup_window = None
 
-        # VibeVoice model manager (singleton for reuse)
-        self.vibevoice_manager = None
+        # VibeVoice model managers (singleton for reuse)
+        self.vibevoice_manager = None  # Local model manager
+        self.vibevoice_remote_manager = VibeVoiceTTSRemoteManager()  # Remote model manager
+
+        # TTS server configuration
+        self.tts_server_type = "remote"  # Default to remote
+        self.tts_remote_url = "ws://10.110.31.157:3000/stream"  # Default remote URL
+
+        # Show TTS server selection dialog on startup
+        self.show_tts_server_selection()
 
         # Create system tray icon
         self.create_system_tray()
@@ -73,6 +171,10 @@ class MainApp(QObject):
         preload_action = tray_menu.addAction("Preload VibeVoice Model")
         preload_action.triggered.connect(self.preload_model)
 
+        # Change TTS Server
+        change_server_action = tray_menu.addAction("Change TTS Server")
+        change_server_action.triggered.connect(self.change_tts_server)
+
         tray_menu.addSeparator()
 
         # Exit
@@ -81,6 +183,29 @@ class MainApp(QObject):
 
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.show()
+
+    def show_tts_server_selection(self):
+        """Show TTS server selection dialog"""
+        dialog = TTSServerSelectionDialog(
+            current_server_type=self.tts_server_type,
+            current_remote_url=self.tts_remote_url
+        )
+
+        if dialog.exec() == QDialog.Accepted:
+            server_type, remote_url = dialog.get_server_config()
+            self.tts_server_type = server_type
+            self.tts_remote_url = remote_url
+
+            # Update remote manager with new URL
+            self.vibevoice_remote_manager.set_server_url(remote_url)
+
+            print(f"TTS Server set to: {server_type}")
+            if server_type == "remote":
+                print(f"Remote URL: {remote_url}")
+
+    def change_tts_server(self):
+        """Change TTS server from tray menu"""
+        self.show_tts_server_selection()
 
     def preload_model(self):
         """Preload the VibeVoice model in background"""
@@ -267,12 +392,29 @@ class MainApp(QObject):
 
         # Start TTS thread with streaming enabled
         try:
-            self.tts_thread = self.vibevoice_manager.create_tts_thread(
-                text=tts_text,
-                model_path="microsoft/VibeVoice-Realtime-0.5B",
-                device="cuda",
-                streaming=True  # Enable streaming for real-time playback
-            )
+            # Use remote or local TTS based on user selection
+            if self.tts_server_type == "remote":
+                # Use remote TTS server
+                self.tts_thread = self.vibevoice_remote_manager.create_tts_thread(
+                    text=tts_text,
+                    server_url=self.tts_remote_url,
+                    streaming=True  # Enable streaming for real-time playback
+                )
+                print(f"Using remote TTS server: {self.tts_remote_url}")
+            else:
+                # Use local TTS model
+                # Initialize local model manager if not already done
+                if self.vibevoice_manager is None:
+                    self.vibevoice_manager = VibeVoiceModelManager()
+
+                self.tts_thread = self.vibevoice_manager.create_tts_thread(
+                    text=tts_text,
+                    model_path="microsoft/VibeVoice-Realtime-0.5B",
+                    device="cuda",
+                    streaming=True  # Enable streaming for real-time playback
+                )
+                print("Using local TTS model")
+
             self.tts_thread.tts_completed.connect(self.on_tts_completed)
             self.tts_thread.tts_error.connect(self.on_tts_error)
             self.tts_thread.progress_update.connect(self.on_tts_progress)
