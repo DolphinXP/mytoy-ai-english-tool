@@ -1,0 +1,25 @@
+# AI-TTS Requirements
+# Install with: pip install -r requirements.txt
+
+# Qt GUI framework
+PySide6>=6.6.0
+
+# Global hotkey detection
+pynput>=1.7.6
+
+# Audio playback
+pygame>=2.5.0
+
+# Windows clipboard access
+pywin32>=306
+
+# OpenAI API client (for DeepSeek, Qwen, etc.)
+openai>=1.0.0
+httpx>=0.25.0
+
+# Note: VibeVoice and its dependencies (torch, transformers, numpy)
+# should already be installed in your environment.
+# If not, you may need to install:
+# torch>=2.0.0
+# transformers>=4.35.0
+# numpy>=1.24.0
