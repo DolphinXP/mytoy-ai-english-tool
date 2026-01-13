@@ -19,25 +19,27 @@ except ImportError:
 
 
 class TranslatableTextEdit(QTextEdit):
-    """Custom QTextEdit that shows translate popup when text is selected"""
+    """Custom QTextEdit that shows translate popup when text is selected and mouse is released"""
     text_selected = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self._last_selection = ""
-        # Connect to selection changed
-        self.selectionChanged.connect(self._on_selection_changed)
     
-    def _on_selection_changed(self):
-        """Handle selection change - emit signal when text is newly selected"""
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release - show translate popup if text is selected"""
+        # Let the parent handle the event first
+        super().mouseReleaseEvent(event)
+        
+        # Check if there's a selection after mouse release
         cursor = self.textCursor()
         selected_text = cursor.selectedText().strip()
         
         # Only emit if there's a new non-empty selection
         if selected_text and selected_text != self._last_selection:
             self._last_selection = selected_text
-            # Small delay to ensure selection is complete
-            QTimer.singleShot(100, self._emit_if_still_selected)
+            # Small delay to ensure UI is stable
+            QTimer.singleShot(50, self._emit_if_still_selected)
         elif not selected_text:
             self._last_selection = ""
     
