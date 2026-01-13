@@ -195,6 +195,7 @@ class MainApp(QObject):
 
         # Create new popup window
         self.popup_window = PopupWindow(original_text)
+        self.popup_window.exit_app_requested.connect(self.exit_app)
         self.popup_window.show()
 
         # Initialize model manager if not already done

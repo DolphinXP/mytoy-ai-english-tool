@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
     QPushButton, QProgressBar, QLabel, QSystemTrayIcon, QMenu, QApplication
 )
-from PySide6.QtCore import QTimer, QSettings, Qt as _Qt
+from PySide6.QtCore import QTimer, QSettings, Qt as _Qt, Signal
 from PySide6.QtGui import QFont, QIcon
 import pygame
 
@@ -101,6 +101,9 @@ class StreamingAudioPlayer:
 
 
 class PopupWindow(QWidget):
+    # Signal to request full application exit
+    exit_app_requested = Signal()
+    
     def __init__(self, original_text, parent=None):
         super().__init__(parent)
         self.original_text = original_text
@@ -141,6 +144,30 @@ class PopupWindow(QWidget):
 
         # Main layout
         layout = QVBoxLayout()
+
+        # Top bar with Exit button
+        top_bar_layout = QHBoxLayout()
+        top_bar_layout.addStretch()
+        
+        # Exit Program button (exits entire application)
+        self.exit_app_btn = QPushButton("⏻ Exit Program")
+        self.exit_app_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                padding: 5px 15px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+        """)
+        self.exit_app_btn.clicked.connect(self.request_exit_app)
+        top_bar_layout.addWidget(self.exit_app_btn)
+        
+        layout.addLayout(top_bar_layout)
 
         # Title font
         title_font = QFont()
@@ -287,6 +314,11 @@ class PopupWindow(QWidget):
         if self.auto_close_countdown <= 0:
             self.auto_close_timer.stop()
             self.close()
+
+    def request_exit_app(self):
+        """Request full application exit"""
+        self.exit_app_requested.emit()
+        self.close()
 
     def update_corrected_text(self, text):
         """Update the corrected text display"""
