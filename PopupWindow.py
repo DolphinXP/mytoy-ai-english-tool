@@ -154,11 +154,12 @@ class PopupWindow(QWidget):
         self.audio_file_path = None
         self.audio_length = 0
         self.current_position = 0
-        
+
         # Streaming audio player
         self.streaming_player = None
         self.is_streaming = False
         self.streaming_chunks_received = 0
+        self.streaming_position_at_end = 0  # Track position when streaming ends
 
         # Settings for position memory
         self.settings = QSettings('AI-TTS-App', 'PopupWindow')
@@ -550,8 +551,11 @@ class PopupWindow(QWidget):
         self.set_status(f"🔊 Streaming audio... ({self.streaming_chunks_received} chunks)")
         
     def stop_streaming_playback(self):
-        """Stop streaming audio playback"""
+        """Stop streaming audio playback and save final position"""
         if self.streaming_player:
+            # Save the position where streaming ended
+            self.streaming_position_at_end = self.streaming_player.get_current_position()
+            print(f"Streaming ended at position: {self.streaming_position_at_end:.2f} seconds")
             self.streaming_player.stop()
             self.streaming_player = None
         self.is_streaming = False
@@ -565,8 +569,8 @@ class PopupWindow(QWidget):
     def set_audio_ready(self, audio_file_path, duration=None):
         """Called when audio is ready for playback"""
         self.audio_file_path = audio_file_path
-        
-        # Stop streaming if it was active
+
+        # Stop streaming if it was active (this saves streaming_position_at_end)
         if self.is_streaming:
             self.stop_streaming_playback()
 
@@ -580,8 +584,11 @@ class PopupWindow(QWidget):
         self.play_stop_btn.setEnabled(True)
         self.update_time_display()
 
-        # Auto-start playback if not already playing via streaming
-        if not self.is_playing:
+        # Auto-start playback from streaming position if we have one
+        if not self.is_playing and self.streaming_position_at_end > 0:
+            print(f"Resuming playback from {self.streaming_position_at_end:.2f} seconds")
+            self.start_playback_from_position(self.streaming_position_at_end)
+        elif not self.is_playing:
             self.start_playback()
 
     def set_audio_error(self, error_message):
@@ -639,6 +646,72 @@ class PopupWindow(QWidget):
             print(f"Error starting playback: {e}")
             self.set_audio_error(f"Playback error: {str(e)}")
 
+    def start_playback_from_position(self, start_seconds):
+        """Start audio playback from a specific position (for resuming after streaming)"""
+        if not self.audio_file_path or not os.path.exists(self.audio_file_path):
+            print("Audio file not found")
+            return
+
+        try:
+            # Stop any currently playing audio
+            pygame.mixer.music.stop()
+
+            # Load the WAV file and extract audio data
+            import wave
+            with wave.open(self.audio_file_path, 'rb') as wav_file:
+                sample_rate = wav_file.getframerate()
+                frames = wav_file.getnframes()
+                channels = wav_file.getnchannels()
+                sampwidth = wav_file.getsampwidth()
+
+                # Calculate starting frame
+                start_frame = int(start_seconds * sample_rate)
+
+                if start_frame >= frames:
+                    # Start position is beyond file length
+                    print(f"Start position {start_seconds}s exceeds file length {frames/sample_rate:.2f}s")
+                    self.start_playback()
+                    return
+
+                # Read audio data from the starting position
+                wav_file.setpos(start_frame)
+                audio_data = wav_file.readframes(frames - start_frame)
+
+            # Create a temporary WAV file in memory with the trimmed audio
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
+                with wave.open(temp_file.name, 'wb') as out_wav:
+                    out_wav.setnchannels(channels)
+                    out_wav.setsampwidth(sampwidth)
+                    out_wav.setframerate(sample_rate)
+                    out_wav.writeframes(audio_data)
+
+                # Load and play the trimmed audio file
+                pygame.mixer.music.load(temp_file.name)
+                pygame.mixer.music.play()
+
+                # Store the temp file path for cleanup
+                self._temp_audio_file = temp_file.name
+
+            self.is_playing = True
+            self.play_stop_btn.setText("⏸ Stop")
+            self.current_position = start_seconds
+
+            # Store offset for progress tracking
+            self._playback_start_offset = start_seconds
+            self._playback_start_time = time.time()
+
+            # Start the progress timer
+            self.progress_timer.start(100)  # Update every 100ms
+
+            print(f"Audio playback started from {start_seconds:.2f}s: {self.audio_file_path}")
+
+        except Exception as e:
+            print(f"Error starting playback from position: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to regular playback if seeking fails
+            self.start_playback()
+
     def stop_playback(self):
         """Stop audio playback"""
         try:
@@ -646,10 +719,30 @@ class PopupWindow(QWidget):
         except:
             pass
 
+        # Clean up temp audio file if it exists
+        if hasattr(self, '_temp_audio_file') and self._temp_audio_file:
+            try:
+                if os.path.exists(self._temp_audio_file):
+                    os.unlink(self._temp_audio_file)
+                self._temp_audio_file = None
+            except:
+                pass
+
+        # Stop Sound object if it was used for seeking
+        if hasattr(self, '_sound_channel') and self._sound_channel:
+            try:
+                self._sound_channel.stop()
+            except:
+                pass
+            self._sound_channel = None
+            self._sound = None
+
         self.is_playing = False
         self.play_stop_btn.setText("▶ Play English Audio")
         self.progress_timer.stop()
         self.current_position = 0
+        self.streaming_position_at_end = 0  # Reset streaming position
+        self._playback_start_offset = 0
         self.progress_bar.setValue(0)
         self.update_time_display()
         print("Audio playback stopped")
@@ -665,24 +758,45 @@ class PopupWindow(QWidget):
             self.time_label.setText(f"{current_time} / --:--")
             # Progress bar in indeterminate mode for streaming
             self.progress_bar.setMaximum(0)  # Indeterminate
-            
-        elif self.is_playing and pygame.mixer.music.get_busy():
-            # Audio is still playing
-            self.current_position += 0.1  # Increment by 100ms
 
-            # Calculate progress percentage
-            if self.audio_length > 0:
-                self.progress_bar.setMaximum(100)
-                progress_percent = min(
-                    100, (self.current_position / self.audio_length) * 100)
-                self.progress_bar.setValue(int(progress_percent))
+        elif self.is_playing:
+            # Check if we have a playback offset (resumed from specific position)
+            if hasattr(self, '_playback_start_offset') and self._playback_start_offset > 0:
+                # Calculate position based on elapsed time since start plus offset
+                elapsed = time.time() - self._playback_start_time
+                self.current_position = self._playback_start_offset + elapsed
 
-            self.update_time_display()
+                # Calculate progress percentage
+                if self.audio_length > 0:
+                    self.progress_bar.setMaximum(100)
+                    progress_percent = min(
+                        100, (self.current_position / self.audio_length) * 100)
+                    self.progress_bar.setValue(int(progress_percent))
 
-        elif self.is_playing and not pygame.mixer.music.get_busy():
-            # Audio finished playing
-            print("Audio playback completed")
-            self.stop_playback()
+                self.update_time_display()
+
+                # Check if we've reached the end
+                if self.current_position >= self.audio_length:
+                    print("Audio playback completed")
+                    self.stop_playback()
+
+            elif pygame.mixer.music.get_busy():
+                # Regular music playback from beginning
+                self.current_position += 0.1  # Increment by 100ms
+
+                # Calculate progress percentage
+                if self.audio_length > 0:
+                    self.progress_bar.setMaximum(100)
+                    progress_percent = min(
+                        100, (self.current_position / self.audio_length) * 100)
+                    self.progress_bar.setValue(int(progress_percent))
+
+                self.update_time_display()
+
+            elif not pygame.mixer.music.get_busy():
+                # Audio finished playing
+                print("Audio playback completed")
+                self.stop_playback()
 
     def update_time_display(self):
         """Update time display"""
