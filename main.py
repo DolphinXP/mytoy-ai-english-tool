@@ -258,23 +258,17 @@ class MainApp(QObject):
         # Update popup with translated text
         if self.popup_window:
             self.popup_window.update_translated_text(translated_text)
-
-        # Determine which text to use for TTS
-        # If original was English, use corrected English; otherwise use translated (should be English now)
-        if self.is_english(self.popup_window.corrected_text):
-            english_for_tts = self.popup_window.corrected_text
-        else:
-            english_for_tts = translated_text
-
-        self.popup_window.update_english_text(english_for_tts)
-        self.popup_window.set_status("Generating audio...")
+            self.popup_window.set_status("Generating audio...")
 
         self.translation_thread = None
+
+        # Always use the corrected text for TTS (it's the AI-corrected English text)
+        tts_text = self.popup_window.corrected_text if self.popup_window else ""
 
         # Start TTS thread with streaming enabled
         try:
             self.tts_thread = self.vibevoice_manager.create_tts_thread(
-                text=english_for_tts,
+                text=tts_text,
                 model_path="microsoft/VibeVoice-Realtime-0.5B",
                 device="cuda",
                 streaming=True  # Enable streaming for real-time playback

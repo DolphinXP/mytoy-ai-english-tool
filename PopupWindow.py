@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QPushButton, QProgressBar, QLabel, QSystemTrayIcon, QMenu, QApplication
 )
 from PySide6.QtCore import QTimer, QSettings, Qt as _Qt, Signal
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont, QIcon, QAction
 import pygame
 
 
@@ -109,7 +109,7 @@ class PopupWindow(QWidget):
         self.original_text = original_text
         self.corrected_text = ""
         self.translated_text = ""
-        self.english_text = ""
+        self.dictionary_thread = None  # For quick dictionary translation
 
         self.is_playing = False
         self.audio_file_path = None
@@ -196,6 +196,10 @@ class PopupWindow(QWidget):
         self.corrected_text_display.setPlainText("Correcting...")
         self.corrected_text_display.setReadOnly(True)
         self.corrected_text_display.setMaximumHeight(100)
+        # Enable custom context menu
+        self.corrected_text_display.setContextMenuPolicy(_Qt.CustomContextMenu)
+        self.corrected_text_display.customContextMenuRequested.connect(
+            lambda pos: self.show_context_menu(self.corrected_text_display, pos))
         layout.addWidget(self.corrected_text_display)
 
         # Translated text section
@@ -208,18 +212,30 @@ class PopupWindow(QWidget):
         self.translated_text_display.setPlainText("Translating...")
         self.translated_text_display.setReadOnly(True)
         self.translated_text_display.setMaximumHeight(100)
+        # Enable custom context menu
+        self.translated_text_display.setContextMenuPolicy(_Qt.CustomContextMenu)
+        self.translated_text_display.customContextMenuRequested.connect(
+            lambda pos: self.show_context_menu(self.translated_text_display, pos))
         layout.addWidget(self.translated_text_display)
 
-        # English text for TTS section
-        english_label = QLabel("English Text (for TTS):")
-        english_label.setFont(title_font)
-        layout.addWidget(english_label)
+        # Quick Dictionary section (replaces English Text for TTS)
+        dictionary_label = QLabel("📖 Quick Dictionary (select text above, right-click → Translate):")
+        dictionary_label.setFont(title_font)
+        layout.addWidget(dictionary_label)
 
-        self.english_text_display = QTextEdit()
-        self.english_text_display.setFont(QFont("Microsoft YaHei", 10))
-        self.english_text_display.setPlainText("Processing...")
-        self.english_text_display.setReadOnly(True)
-        layout.addWidget(self.english_text_display)
+        self.dictionary_display = QTextEdit()
+        self.dictionary_display.setFont(QFont("Microsoft YaHei", 10))
+        self.dictionary_display.setPlainText("Select text in Corrected or Translated sections, then right-click and choose 'Translate' to see the definition here.")
+        self.dictionary_display.setReadOnly(True)
+        self.dictionary_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 5px;
+                padding: 5px;
+            }
+        """)
+        layout.addWidget(self.dictionary_display)
 
         # Status label
         self.status_label = QLabel("Ready")
@@ -344,10 +360,68 @@ class PopupWindow(QWidget):
             current_text = ""
         self.translated_text_display.setPlainText(current_text + chunk)
 
-    def update_english_text(self, text):
-        """Update the English text for TTS display"""
-        self.english_text = text
-        self.english_text_display.setPlainText(text)
+    def show_context_menu(self, text_edit, pos):
+        """Show custom context menu with Translate option"""
+        menu = QMenu(self)
+        
+        # Get selected text
+        cursor = text_edit.textCursor()
+        selected_text = cursor.selectedText()
+        
+        # Add Copy action
+        copy_action = QAction("Copy", self)
+        copy_action.triggered.connect(text_edit.copy)
+        copy_action.setEnabled(cursor.hasSelection())
+        menu.addAction(copy_action)
+        
+        # Add Select All action
+        select_all_action = QAction("Select All", self)
+        select_all_action.triggered.connect(text_edit.selectAll)
+        menu.addAction(select_all_action)
+        
+        menu.addSeparator()
+        
+        # Add Translate action
+        translate_action = QAction("🔍 Translate to Dictionary", self)
+        translate_action.triggered.connect(lambda: self.translate_selected(text_edit))
+        translate_action.setEnabled(cursor.hasSelection())
+        menu.addAction(translate_action)
+        
+        # Show menu at cursor position
+        menu.exec(text_edit.mapToGlobal(pos))
+
+    def translate_selected(self, text_edit):
+        """Translate selected text and show in dictionary display"""
+        cursor = text_edit.textCursor()
+        selected_text = cursor.selectedText().strip()
+        
+        if not selected_text:
+            return
+        
+        # Get context from the full text
+        full_text = text_edit.toPlainText()
+        
+        # Show loading state
+        self.dictionary_display.setPlainText(f"🔄 Translating: {selected_text}...")
+        
+        # Start dictionary translation thread
+        from DictionaryThread import DictionaryThread
+        self.dictionary_thread = DictionaryThread(selected_text, full_text)
+        self.dictionary_thread.translation_chunk.connect(self.on_dictionary_chunk)
+        self.dictionary_thread.translation_done.connect(self.on_dictionary_done)
+        self.dictionary_thread.start()
+
+    def on_dictionary_chunk(self, chunk):
+        """Handle streaming dictionary chunk"""
+        current_text = self.dictionary_display.toPlainText()
+        if current_text.startswith("🔄 Translating:"):
+            current_text = ""
+        self.dictionary_display.setPlainText(current_text + chunk)
+
+    def on_dictionary_done(self, result):
+        """Handle dictionary translation completion"""
+        # Result is already displayed via chunks
+        pass
 
     def set_status(self, status):
         """Update status label"""
