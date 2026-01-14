@@ -184,7 +184,7 @@ class PopupWindow(QWidget):
 
     def init_ui(self):
         self.setWindowTitle("AI-TTS - Text Correction, Translation & TTS")
-        self.setMinimumSize(500, 600)
+        self.setMinimumSize(300, 600)
 
         # Make window stay on top
         self.setWindowFlags(self.windowFlags() | _Qt.WindowStaysOnTopHint)
@@ -230,7 +230,7 @@ class PopupWindow(QWidget):
         self.original_text_display.setFont(QFont("Microsoft YaHei", 10))
         self.original_text_display.setPlainText(self.original_text)
         self.original_text_display.setReadOnly(True)
-        self.original_text_display.setMaximumHeight(100)
+        self.original_text_display.setMaximumHeight(50)
         layout.addWidget(self.original_text_display)
 
         # Corrected text section
@@ -243,7 +243,7 @@ class PopupWindow(QWidget):
         self.corrected_text_display.setFont(QFont("Microsoft YaHei", 10))
         self.corrected_text_display.setPlainText("Correcting...")
         self.corrected_text_display.setReadOnly(True)
-        self.corrected_text_display.setMaximumHeight(100)
+        # self.corrected_text_display.setMaximumHeight(100)
         # Enable custom context menu
         self.corrected_text_display.setContextMenuPolicy(_Qt.CustomContextMenu)
         self.corrected_text_display.customContextMenuRequested.connect(
@@ -262,7 +262,7 @@ class PopupWindow(QWidget):
         self.translated_text_display.setFont(QFont("Microsoft YaHei", 10))
         self.translated_text_display.setPlainText("Translating...")
         self.translated_text_display.setReadOnly(True)
-        self.translated_text_display.setMaximumHeight(100)
+        # self.translated_text_display.setMaximumHeight(100)
         # Enable custom context menu
         self.translated_text_display.setContextMenuPolicy(
             _Qt.CustomContextMenu)
