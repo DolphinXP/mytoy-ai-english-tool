@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QProgressBar, QLabel, QSystemTrayIcon, QMenu, QApplication
 )
 from PySide6.QtCore import QTimer, QSettings, Qt as _Qt, Signal, QEvent
-from PySide6.QtGui import QFont, QIcon, QAction, QMouseEvent, QTextCursor
+from PySide6.QtGui import QFont, QIcon, QAction, QMouseEvent, QTextCursor, QCursor
 import pygame
 
 try:
@@ -378,9 +378,10 @@ class PopupWindow(QWidget):
         """Show translate menu at cursor position for the selected word"""
         cursor = text_edit.textCursor()
         if cursor.hasSelection():
-            # Get cursor position in global coordinates
-            cursor_rect = text_edit.cursorRect(cursor)
-            global_pos = text_edit.mapToGlobal(cursor_rect.bottomRight())
+            # Get mouse cursor position in global coordinates, move left 10px
+            global_pos = QCursor.pos()
+            global_pos.setX(global_pos.x() - 20)
+            global_pos.setY(global_pos.y() - 10)
 
             # Create a mini menu with just translate option
             menu = QMenu(self)
