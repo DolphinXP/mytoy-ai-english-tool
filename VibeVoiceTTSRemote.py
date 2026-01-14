@@ -19,14 +19,16 @@ class VibeVoiceTTSRemote(QThread):
     tts_completed = Signal(str)  # Signal to emit audio file path
     tts_error = Signal(str)  # Signal for error messages
     progress_update = Signal(str)  # Signal for progress updates
-    audio_chunk_ready = Signal(bytes, int)  # Signal for streaming: (audio_bytes, sample_rate)
+    # Signal for streaming: (audio_bytes, sample_rate)
+    audio_chunk_ready = Signal(bytes, int)
 
     def __init__(self, text, server_url="ws://10.110.31.157:3000/stream", streaming=False, voice_preset="en-Carter_man"):
         super().__init__()
         self.text = text
         self.server_url = server_url
         self.streaming = streaming
-        self.voice_preset = voice_preset  # Voice preset to use (e.g., "en-Carter_man")
+        # Voice preset to use (e.g., "en-Carter_man")
+        self.voice_preset = voice_preset
         self.sample_rate = 24000  # Standard sample rate for VibeVoice
 
         # Audio storage
@@ -73,13 +75,15 @@ class VibeVoiceTTSRemote(QThread):
             if len(audio_array) > 0:
                 max_val = np.max(np.abs(audio_array))
                 if max_val > 32767:
-                    print(f"Warning: Audio data exceeds int16 range: {max_val}")
+                    print(
+                        f"Warning: Audio data exceeds int16 range: {max_val}")
 
             # Return the bytes directly (already in int16 PCM format)
             return audio_array.tobytes()
 
         except Exception as e:
-            print(f"Error parsing audio chunk: {e}, data length: {len(data) if data else 0}")
+            print(
+                f"Error parsing audio chunk: {e}, data length: {len(data) if data else 0}")
             return b''
 
     def _on_data(self, ws, data, data_type, continue_flag):
@@ -96,16 +100,17 @@ class VibeVoiceTTSRemote(QThread):
                     data = data.decode('utf-8')
                 log_data = json.loads(data)
                 event_type = log_data.get("event", "unknown")
-                print(f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
+                # print(f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
             except:
-                print(f"[WebSocket] Received text: {str(data)[:100]}")
+                # print(f"[WebSocket] Received text: {str(data)[:100]}")
+                pass
             return
 
         elif data_type == 2:
             # Binary message (audio data)
             if isinstance(data, str):
                 data = data.encode('latin-1')
-            print(f"[WebSocket] Received binary audio chunk: {len(data)} bytes")
+            # print(f"[WebSocket] Received binary audio chunk: {len(data)} bytes")
 
             # Parse and emit audio chunk
             audio_bytes = self._parse_audio_chunk(data)
@@ -118,7 +123,8 @@ class VibeVoiceTTSRemote(QThread):
                 if self.streaming:
                     self.audio_chunk_ready.emit(audio_bytes, self.sample_rate)
             else:
-                print(f"[WebSocket] Failed to parse audio chunk, length: {len(data)}")
+                print(
+                    f"[WebSocket] Failed to parse audio chunk, length: {len(data)}")
 
     def _on_message(self, ws, message):
         """Fallback handler for when on_data is not available"""
@@ -132,14 +138,15 @@ class VibeVoiceTTSRemote(QThread):
                 import json
                 log_data = json.loads(message)
                 event_type = log_data.get("event", "unknown")
-                print(f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
+                print(
+                    f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
             except:
                 print(f"[WebSocket] Received text message: {message[:100]}")
             # Don't process text messages as audio
             return
 
         # This is a binary message (audio data)
-        print(f"[WebSocket] Received binary audio chunk: {len(message)} bytes")
+        # print(f"[WebSocket] Received binary audio chunk: {len(message)} bytes")
 
         # Parse and emit audio chunk
         audio_bytes = self._parse_audio_chunk(message)
@@ -152,7 +159,8 @@ class VibeVoiceTTSRemote(QThread):
             if self.streaming:
                 self.audio_chunk_ready.emit(audio_bytes, self.sample_rate)
         else:
-            print(f"[WebSocket] Failed to parse audio chunk, length: {len(message)}")
+            print(
+                f"[WebSocket] Failed to parse audio chunk, length: {len(message)}")
 
     def _on_error(self, ws, error):
         """Handle WebSocket errors - only emit for real errors, not normal closure"""
@@ -182,9 +190,11 @@ class VibeVoiceTTSRemote(QThread):
         )
 
         if is_normal_close and len(self.all_audio_data) > 0:
-            print(f"[WebSocket] Streaming completed normally (code: {close_status_code})")
+            print(
+                f"[WebSocket] Streaming completed normally (code: {close_status_code})")
         elif close_status_code not in normal_close_codes:
-            print(f"[WebSocket] Connection closed with code: {close_status_code} - {close_msg}")
+            print(
+                f"[WebSocket] Connection closed with code: {close_status_code} - {close_msg}")
 
         # Save audio to file if we received any data
         if self.all_audio_data:
@@ -200,7 +210,8 @@ class VibeVoiceTTSRemote(QThread):
     def _on_open(self, ws):
         """Handle WebSocket connection open"""
         self._connection_completed = True
-        self.progress_update.emit(f"Connected to remote TTS server: {self.server_url}")
+        self.progress_update.emit(
+            f"Connected to remote TTS server: {self.server_url}")
 
     def _save_audio(self, audio_bytes):
         """Save audio to temporary WAV file"""
