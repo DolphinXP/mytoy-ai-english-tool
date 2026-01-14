@@ -331,7 +331,7 @@ class PopupWindow(QWidget):
         layout.addLayout(controls_layout)
 
         # Auto-close countdown label
-        self.countdown_label = QLabel("Auto-close in 360 seconds")
+        self.countdown_label = QLabel("Auto-close in 720 seconds")
         self.countdown_label.setStyleSheet("color: gray; font-size: 10px;")
         layout.addWidget(self.countdown_label)
 
@@ -391,8 +391,8 @@ class PopupWindow(QWidget):
             menu.exec(global_pos)
 
     def setup_auto_close_timer(self):
-        """Setup timer for auto-close after 360 seconds"""
-        self.auto_close_countdown = 360
+        """Setup timer for auto-close after 720 seconds"""
+        self.auto_close_countdown = 720
         self.auto_close_timer = QTimer()
         self.auto_close_timer.timeout.connect(self.update_countdown)
         self.auto_close_timer.start(1000)
@@ -844,7 +844,8 @@ class PopupWindow(QWidget):
                     self._drain_idle_ticks = 0
                     self.status_label.setText("✅ Audio ready")
                     if self.streaming_position_at_end >= 0.1:
-                        self.start_playback_from_position(self.streaming_position_at_end)
+                        self.start_playback_from_position(
+                            self.streaming_position_at_end)
                     else:
                         self.start_playback()
                     return
