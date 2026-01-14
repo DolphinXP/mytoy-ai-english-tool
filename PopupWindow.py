@@ -22,20 +22,20 @@ except ImportError:
 class TranslatableTextEdit(QTextEdit):
     """Custom QTextEdit that shows translate popup when text is selected and mouse is released"""
     text_selected = Signal()
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._last_selection = ""
-    
+
     def mouseReleaseEvent(self, event):
         """Handle mouse release - show translate popup if text is selected"""
         # Let the parent handle the event first
         super().mouseReleaseEvent(event)
-        
+
         # Check if there's a selection after mouse release
         cursor = self.textCursor()
         selected_text = cursor.selectedText().strip()
-        
+
         # Only emit if there's a new non-empty selection
         if selected_text and selected_text != self._last_selection:
             self._last_selection = selected_text
@@ -43,7 +43,7 @@ class TranslatableTextEdit(QTextEdit):
             QTimer.singleShot(50, self._emit_if_still_selected)
         elif not selected_text:
             self._last_selection = ""
-    
+
     def _emit_if_still_selected(self):
         """Emit signal if text is still selected"""
         cursor = self.textCursor()
@@ -53,7 +53,7 @@ class TranslatableTextEdit(QTextEdit):
 
 class StreamingAudioPlayer:
     """Real-time audio streaming player using pyaudio"""
-    
+
     def __init__(self, sample_rate=24000, channels=1, sample_width=2):
         self.sample_rate = sample_rate
         self.channels = channels
@@ -65,44 +65,45 @@ class StreamingAudioPlayer:
         self.total_bytes_played = 0
         self.pyaudio_instance = None
         self.stream = None
-        
+
     def start(self):
         """Start the streaming playback"""
         if self.is_playing:
             return
-        
+
         self.stop_event.clear()
         self.is_playing = True
         self.total_bytes_played = 0
-        self.playback_thread = threading.Thread(target=self._playback_loop, daemon=True)
+        self.playback_thread = threading.Thread(
+            target=self._playback_loop, daemon=True)
         self.playback_thread.start()
-        
+
     def add_audio_chunk(self, audio_bytes):
         """Add an audio chunk to the playback queue"""
         if self.is_playing:
             self.audio_queue.put(audio_bytes)
-            
+
     def stop(self):
         """Stop the streaming playback"""
         self.stop_event.set()
         self.is_playing = False
-        
+
         # Clear the queue
         while not self.audio_queue.empty():
             try:
                 self.audio_queue.get_nowait()
             except queue.Empty:
                 break
-                
+
         if self.playback_thread and self.playback_thread.is_alive():
             self.playback_thread.join(timeout=1.0)
-            
+
     def _playback_loop(self):
         """Main playback loop running in a separate thread"""
         try:
             import pyaudio
             self.pyaudio_instance = pyaudio.PyAudio()
-            
+
             self.stream = self.pyaudio_instance.open(
                 format=pyaudio.paInt16,
                 channels=self.channels,
@@ -110,7 +111,7 @@ class StreamingAudioPlayer:
                 output=True,
                 frames_per_buffer=1024
             )
-            
+
             while not self.stop_event.is_set():
                 try:
                     # Get audio data with timeout
@@ -119,7 +120,7 @@ class StreamingAudioPlayer:
                     self.total_bytes_played += len(audio_data)
                 except queue.Empty:
                     continue
-                    
+
         except ImportError:
             print("pyaudio not installed, falling back to non-streaming playback")
         except Exception as e:
@@ -132,7 +133,7 @@ class StreamingAudioPlayer:
                 self.pyaudio_instance.terminate()
             self.stream = None
             self.pyaudio_instance = None
-            
+
     def get_current_position(self):
         """Get current playback position in seconds"""
         bytes_per_sample = self.sample_width * self.channels
@@ -145,7 +146,7 @@ class PopupWindow(QWidget):
     exit_app_requested = Signal()
     # Signal emitted when popup is being destroyed
     popup_destroyed = Signal()
-    
+
     def __init__(self, original_text, parent=None):
         super().__init__(parent)
         self.original_text = original_text
@@ -191,7 +192,7 @@ class PopupWindow(QWidget):
         # Top bar with Exit button
         top_bar_layout = QHBoxLayout()
         top_bar_layout.addStretch()
-        
+
         # Exit Program button (exits entire application)
         self.exit_app_btn = QPushButton("⏻ Exit Program")
         self.exit_app_btn.setStyleSheet("""
@@ -209,7 +210,7 @@ class PopupWindow(QWidget):
         """)
         self.exit_app_btn.clicked.connect(self.request_exit_app)
         top_bar_layout.addWidget(self.exit_app_btn)
-        
+
         layout.addLayout(top_bar_layout)
 
         # Title font
@@ -230,7 +231,8 @@ class PopupWindow(QWidget):
         layout.addWidget(self.original_text_display)
 
         # Corrected text section
-        corrected_label = QLabel("AI Corrected Text (fixes PDF formatting issues):")
+        corrected_label = QLabel(
+            "AI Corrected Text (fixes PDF formatting issues):")
         corrected_label.setFont(title_font)
         layout.addWidget(corrected_label)
 
@@ -259,7 +261,8 @@ class PopupWindow(QWidget):
         self.translated_text_display.setReadOnly(True)
         self.translated_text_display.setMaximumHeight(100)
         # Enable custom context menu
-        self.translated_text_display.setContextMenuPolicy(_Qt.CustomContextMenu)
+        self.translated_text_display.setContextMenuPolicy(
+            _Qt.CustomContextMenu)
         self.translated_text_display.customContextMenuRequested.connect(
             lambda pos: self.show_context_menu(self.translated_text_display, pos))
         # Connect text selection signal for translation popup
@@ -268,14 +271,15 @@ class PopupWindow(QWidget):
         layout.addWidget(self.translated_text_display)
 
         # Quick Dictionary section (replaces English Text for TTS)
-        dictionary_label = QLabel("📖 Quick Dictionary (select text above → popup menu → Translate):")
+        dictionary_label = QLabel("📖 Quick Dictionary:")
         dictionary_label.setFont(title_font)
         layout.addWidget(dictionary_label)
 
         # Use QTextBrowser for markdown rendering
         self.dictionary_display = QTextBrowser()
         self.dictionary_display.setFont(QFont("Microsoft YaHei", 10))
-        self.dictionary_display.setPlainText("Double-click a word, or select text in Corrected/Translated sections, then right-click and choose 'Translate' to see the definition here.")
+        self.dictionary_display.setPlainText(
+            "Double-click a word, or select text in Corrected/Translated sections, then right-click and choose 'Translate' to see the definition here.")
         self.dictionary_display.setOpenExternalLinks(True)
         self.dictionary_display.setStyleSheet("""
             QTextBrowser {
@@ -374,11 +378,12 @@ class PopupWindow(QWidget):
             # Get cursor position in global coordinates
             cursor_rect = text_edit.cursorRect(cursor)
             global_pos = text_edit.mapToGlobal(cursor_rect.bottomRight())
-            
+
             # Create a mini menu with just translate option
             menu = QMenu(self)
             translate_action = QAction("🔍 Translate to Dictionary", self)
-            translate_action.triggered.connect(lambda: self.translate_selected(text_edit))
+            translate_action.triggered.connect(
+                lambda: self.translate_selected(text_edit))
             menu.addAction(translate_action)
             menu.exec(global_pos)
 
@@ -431,30 +436,31 @@ class PopupWindow(QWidget):
     def show_context_menu(self, text_edit, pos):
         """Show custom context menu with Translate option"""
         menu = QMenu(self)
-        
+
         # Get selected text
         cursor = text_edit.textCursor()
         selected_text = cursor.selectedText()
-        
+
         # Add Copy action
         copy_action = QAction("Copy", self)
         copy_action.triggered.connect(text_edit.copy)
         copy_action.setEnabled(cursor.hasSelection())
         menu.addAction(copy_action)
-        
+
         # Add Select All action
         select_all_action = QAction("Select All", self)
         select_all_action.triggered.connect(text_edit.selectAll)
         menu.addAction(select_all_action)
-        
+
         menu.addSeparator()
-        
+
         # Add Translate action
         translate_action = QAction("🔍 Translate to Dictionary", self)
-        translate_action.triggered.connect(lambda: self.translate_selected(text_edit))
+        translate_action.triggered.connect(
+            lambda: self.translate_selected(text_edit))
         translate_action.setEnabled(cursor.hasSelection())
         menu.addAction(translate_action)
-        
+
         # Show menu at cursor position
         menu.exec(text_edit.mapToGlobal(pos))
 
@@ -462,22 +468,42 @@ class PopupWindow(QWidget):
         """Translate selected text and show in dictionary display"""
         cursor = text_edit.textCursor()
         selected_text = cursor.selectedText().strip()
-        
+
         if not selected_text:
             return
-        
+
         # Get context from the full text
         full_text = text_edit.toPlainText()
-        
+
         # Show loading state
         self._dictionary_markdown = ""
-        self.dictionary_display.setPlainText(f"🔄 Translating: {selected_text}...")
-        
+        self.dictionary_display.setPlainText(
+            f"🔄 Translating: {selected_text}...")
+
+        # Clean up any existing dictionary thread before starting a new one
+        if self.dictionary_thread and self.dictionary_thread.isRunning():
+            print("Stopping previous dictionary thread...")
+            try:
+                # Disconnect signals to prevent updates from old thread
+                self.dictionary_thread.translation_chunk.disconnect()
+                self.dictionary_thread.translation_done.disconnect()
+            except:
+                pass
+            # Request thread to stop
+            self.dictionary_thread.stop()
+            # Wait for thread to finish (with timeout)
+            if not self.dictionary_thread.wait(500):  # 500ms timeout
+                print("Dictionary thread did not finish in time, terminating...")
+                self.dictionary_thread.terminate()
+                self.dictionary_thread.wait(200)
+
         # Start dictionary translation thread
         from DictionaryThread import DictionaryThread
         self.dictionary_thread = DictionaryThread(selected_text, full_text)
-        self.dictionary_thread.translation_chunk.connect(self.on_dictionary_chunk)
-        self.dictionary_thread.translation_done.connect(self.on_dictionary_done)
+        self.dictionary_thread.translation_chunk.connect(
+            self.on_dictionary_chunk)
+        self.dictionary_thread.translation_done.connect(
+            self.on_dictionary_done)
         self.dictionary_thread.start()
 
     def on_dictionary_chunk(self, chunk):
@@ -485,9 +511,9 @@ class PopupWindow(QWidget):
         # Accumulate markdown
         if self._dictionary_markdown == "" and self.dictionary_display.toPlainText().startswith("🔄 Translating:"):
             self._dictionary_markdown = ""
-        
+
         self._dictionary_markdown += chunk
-        
+
         # Render markdown to HTML
         self.update_dictionary_display()
 
@@ -527,7 +553,7 @@ class PopupWindow(QWidget):
         self.status_label.setText(status)
 
     # --- Streaming Audio Methods ---
-    
+
     def start_streaming_playback(self):
         """Initialize streaming audio playback"""
         self.is_streaming = True
@@ -540,20 +566,21 @@ class PopupWindow(QWidget):
         self.progress_timer.start(100)
         self.set_status("🔊 Streaming audio...")
         print("Streaming playback started")
-        
+
     def on_audio_chunk_ready(self, audio_bytes, sample_rate):
         """Handle incoming audio chunk for streaming playback"""
         if not self.is_streaming:
             self.start_streaming_playback()
-            
+
         self.streaming_chunks_received += 1
-        
+
         if self.streaming_player:
             self.streaming_player.add_audio_chunk(audio_bytes)
-            
+
         # Update status with chunk count
-        self.set_status(f"🔊 Streaming audio... ({self.streaming_chunks_received} chunks)")
-        
+        self.set_status(
+            f"🔊 Streaming audio... ({self.streaming_chunks_received} chunks)")
+
     def stop_streaming_playback(self, wait_for_completion=False):
         """Stop streaming audio playback and save final position
 
@@ -575,8 +602,10 @@ class PopupWindow(QWidget):
             # Save the position where streaming ended
             # Get position before stopping to ensure we capture the actual played position
             self.streaming_position_at_end = self.streaming_player.get_current_position()
-            print(f"Streaming ended at position: {self.streaming_position_at_end:.2f} seconds")
-            print(f"Total bytes played by streaming player: {self.streaming_player.total_bytes_played}")
+            print(
+                f"Streaming ended at position: {self.streaming_position_at_end:.2f} seconds")
+            print(
+                f"Total bytes played by streaming player: {self.streaming_player.total_bytes_played}")
             self.streaming_player.stop()
             self.streaming_player = None
         self.is_streaming = False
@@ -608,9 +637,11 @@ class PopupWindow(QWidget):
         self.update_time_display()
 
         # Auto-start playback from streaming position if we have one
-        print(f"Checking resume conditions: is_playing={self.is_playing}, streaming_position_at_end={self.streaming_position_at_end:.2f}")
+        print(
+            f"Checking resume conditions: is_playing={self.is_playing}, streaming_position_at_end={self.streaming_position_at_end:.2f}")
         if not self.is_playing and self.streaming_position_at_end >= 0.1:
-            print(f"Resuming playback from {self.streaming_position_at_end:.2f} seconds")
+            print(
+                f"Resuming playback from {self.streaming_position_at_end:.2f} seconds")
             self.start_playback_from_position(self.streaming_position_at_end)
         elif not self.is_playing:
             print("Starting playback from beginning")
@@ -620,7 +651,7 @@ class PopupWindow(QWidget):
         """Called when audio generation fails"""
         self.status_label.setText(f"❌ Audio error: {error_message}")
         self.play_stop_btn.setEnabled(False)
-        
+
         # Stop streaming if it was active
         if self.is_streaming:
             self.stop_streaming_playback()
@@ -694,7 +725,8 @@ class PopupWindow(QWidget):
 
                 if start_frame >= frames:
                     # Start position is beyond file length
-                    print(f"Start position {start_seconds}s exceeds file length {frames/sample_rate:.2f}s")
+                    print(
+                        f"Start position {start_seconds}s exceeds file length {frames/sample_rate:.2f}s")
                     self.start_playback()
                     return
 
@@ -728,7 +760,8 @@ class PopupWindow(QWidget):
             # Start the progress timer
             self.progress_timer.start(100)  # Update every 100ms
 
-            print(f"Audio playback started from {start_seconds:.2f}s: {self.audio_file_path}")
+            print(
+                f"Audio playback started from {start_seconds:.2f}s: {self.audio_file_path}")
 
         except Exception as e:
             print(f"Error starting playback from position: {e}")
