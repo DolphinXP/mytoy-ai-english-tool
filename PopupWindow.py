@@ -164,6 +164,9 @@ class PopupWindow(QWidget):
         self.is_streaming = False
         self.streaming_chunks_received = 0
         self.streaming_position_at_end = 0  # Track position when streaming ends
+        self._streaming_done = False
+        self._drain_idle_ticks = 0
+        self._last_stream_chunk_time = None
 
         # Settings for position memory
         self.settings = QSettings('AI-TTS-App', 'PopupWindow')
@@ -558,6 +561,9 @@ class PopupWindow(QWidget):
         """Initialize streaming audio playback"""
         self.is_streaming = True
         self.streaming_chunks_received = 0
+        self._streaming_done = False
+        self._drain_idle_ticks = 0
+        self._last_stream_chunk_time = None
         self.streaming_player = StreamingAudioPlayer(sample_rate=24000)
         self.streaming_player.start()
         self.is_playing = True
@@ -573,6 +579,8 @@ class PopupWindow(QWidget):
             self.start_streaming_playback()
 
         self.streaming_chunks_received += 1
+        self._last_stream_chunk_time = time.time()
+        self._drain_idle_ticks = 0
 
         if self.streaming_player:
             self.streaming_player.add_audio_chunk(audio_bytes)
@@ -612,6 +620,8 @@ class PopupWindow(QWidget):
         self.is_playing = False
         self.play_stop_btn.setText("▶ Play English Audio")
         self.progress_timer.stop()
+        self._streaming_done = False
+        self._drain_idle_ticks = 0
         print("Streaming playback stopped")
 
     # --- File-based Audio Methods ---
@@ -620,21 +630,22 @@ class PopupWindow(QWidget):
         """Called when audio is ready for playback"""
         self.audio_file_path = audio_file_path
 
-        # Stop streaming if it was active (this saves streaming_position_at_end)
-        # Wait for all queued audio to finish playing before stopping
-        if self.is_streaming:
-            print("Waiting for streaming playback to complete...")
-            self.stop_streaming_playback(wait_for_completion=True)
-
         # Get actual audio length
         self.audio_length = self.get_audio_length(audio_file_path)
 
         print(f"Audio file: {audio_file_path}")
         print(f"Audio length: {self.audio_length} seconds")
 
-        self.status_label.setText("✅ Audio ready")
+        if self.is_streaming:
+            self.status_label.setText("Draining audio buffer...")
+            self._streaming_done = True
+        else:
+            self.status_label.setText("✅ Audio ready")
         self.play_stop_btn.setEnabled(True)
         self.update_time_display()
+
+        if self.is_streaming:
+            return
 
         # Auto-start playback from streaming position if we have one
         print(
@@ -734,20 +745,21 @@ class PopupWindow(QWidget):
                 wav_file.setpos(start_frame)
                 audio_data = wav_file.readframes(frames - start_frame)
 
-            # Create a temporary WAV file in memory with the trimmed audio
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
-                with wave.open(temp_file.name, 'wb') as out_wav:
-                    out_wav.setnchannels(channels)
-                    out_wav.setsampwidth(sampwidth)
-                    out_wav.setframerate(sample_rate)
-                    out_wav.writeframes(audio_data)
+            # Create a temporary WAV file with the trimmed audio
+            temp_fd, temp_path = tempfile.mkstemp(suffix='.wav')
+            os.close(temp_fd)
+            with wave.open(temp_path, 'wb') as out_wav:
+                out_wav.setnchannels(channels)
+                out_wav.setsampwidth(sampwidth)
+                out_wav.setframerate(sample_rate)
+                out_wav.writeframes(audio_data)
 
-                # Load and play the trimmed audio file
-                pygame.mixer.music.load(temp_file.name)
-                pygame.mixer.music.play()
+            # Load and play the trimmed audio file
+            pygame.mixer.music.load(temp_path)
+            pygame.mixer.music.play()
 
-                # Store the temp file path for cleanup
-                self._temp_audio_file = temp_file.name
+            # Store the temp file path for cleanup
+            self._temp_audio_file = temp_path
 
             self.is_playing = True
             self.play_stop_btn.setText("⏸ Stop")
@@ -816,6 +828,26 @@ class PopupWindow(QWidget):
             self.time_label.setText(f"{current_time} / --:--")
             # Progress bar in indeterminate mode for streaming
             self.progress_bar.setMaximum(0)  # Indeterminate
+
+            if self._streaming_done:
+                if self.streaming_player.audio_queue.empty():
+                    last_chunk_time = self._last_stream_chunk_time or time.time()
+                    if time.time() - last_chunk_time >= 0.25:
+                        self._drain_idle_ticks += 1
+                else:
+                    self._drain_idle_ticks = 0
+
+                if self._drain_idle_ticks >= 3:
+                    print("Streaming playback drained, switching to file")
+                    self.stop_streaming_playback(wait_for_completion=False)
+                    self._streaming_done = False
+                    self._drain_idle_ticks = 0
+                    self.status_label.setText("✅ Audio ready")
+                    if self.streaming_position_at_end >= 0.1:
+                        self.start_playback_from_position(self.streaming_position_at_end)
+                    else:
+                        self.start_playback()
+                    return
 
         elif self.is_playing:
             # Check if we have a playback offset (resumed from specific position)
