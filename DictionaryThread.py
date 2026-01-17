@@ -3,6 +3,7 @@ import warnings
 import httpx
 from openai import OpenAI
 
+from DefaultConfigs import default_configs
 from PySide6.QtCore import Signal, QThread
 
 # Suppress SSL warnings from unverified HTTPS requests
@@ -20,16 +21,6 @@ class DictionaryThread(QThread):
         self.context_text = context_text
         self.full_translation = ""
         self._is_running = True  # Flag to check if thread should continue
-
-        # Default API configurations
-        default_configs = {
-            'deepseek': {
-                'endpoint': "https://api.deepseek.com",
-                'key': "YOUR_API_KEY_HERE",
-                'model': "deepseek-chat",
-                'proxy': None
-            },
-        }
 
         # Use provided config or default to deepseek
         if api_config is None:

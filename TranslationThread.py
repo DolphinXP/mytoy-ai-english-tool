@@ -4,6 +4,7 @@ import httpx
 from openai import OpenAI
 
 from PySide6.QtCore import Signal, QThread
+from DefaultConfigs import default_configs
 
 # Suppress SSL warnings from unverified HTTPS requests
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
@@ -18,16 +19,7 @@ class TranslationThread(QThread):
         self.text_to_translate = text_to_translate
         self.full_translation = ""
 
-        # Default API configurations
-        default_configs = {
-            'deepseek': {
-                'endpoint': "https://api.deepseek.com",
-                'key': "YOUR_API_KEY_HERE",
-                'model': "deepseek-chat",
-                'proxy': None,
-                'timeout': 30.0
-            },
-        }
+
 
         # Use provided config or default to deepseek
         if api_config is None:
@@ -64,7 +56,7 @@ class TranslationThread(QThread):
                 {
                     "role": "system",
                     "content": "You are a translation assistant. Please translate English to Chinese, and translate all non-English text (including Chinese) to English. "
-                    "All text I send you needs to be translated. Just answer with the translation result. "
+                    "All text I send you needs to be translated. Just answer with the translation result, don't repeat original text. "
                     "Make the translation conform to the target language's habits. "
                     "Adjust punctuation and format appropriately for readability."
                 }
