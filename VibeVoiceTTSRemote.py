@@ -39,6 +39,9 @@ class VibeVoiceTTSRemote(QThread):
         self._stop_requested = False
         self._connection_completed = False  # Track if connection completed successfully
 
+        # WebSocket reference for proper cleanup
+        self._ws = None
+
     def _build_url(self):
         """Build the WebSocket URL with encoded text parameter and voice preset"""
         from urllib.parse import urlencode
@@ -239,7 +242,7 @@ class VibeVoiceTTSRemote(QThread):
 
             # Create WebSocket connection with explicit binary mode
             # Use on_data callback to properly handle both text and binary frames
-            ws = websocket.WebSocketApp(
+            self._ws = websocket.WebSocketApp(
                 url,
                 on_open=self._on_open,
                 on_data=self._on_data,
@@ -249,7 +252,10 @@ class VibeVoiceTTSRemote(QThread):
 
             # Run WebSocket connection (this blocks until connection closes)
             # Enable ping and suppress close errors
-            ws.run_forever(ping_interval=30, ping_timeout=10)
+            self._ws.run_forever(ping_interval=30, ping_timeout=10)
+
+            # Clear WebSocket reference after it's done
+            self._ws = None
 
         except Exception as e:
             error_msg = f"Remote TTS error: {str(e)}"
@@ -257,8 +263,15 @@ class VibeVoiceTTSRemote(QThread):
             self.tts_error.emit(error_msg)
 
     def stop(self):
-        """Request to stop TTS generation"""
+        """Request to stop TTS generation and close WebSocket connection"""
         self._stop_requested = True
+
+        # Close the WebSocket connection if it's active
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception as e:
+                print(f"Error closing WebSocket: {e}")
 
 
 class VibeVoiceTTSRemoteManager:

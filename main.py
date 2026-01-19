@@ -297,7 +297,8 @@ class MainApp(QObject):
             return False
 
         # Count English/Latin letters vs Chinese characters
-        latin_chars = sum(1 for c in text if ('\u0020' <= c <= '\u007F') or ('\u0080' <= c <= '\u00FF'))
+        latin_chars = sum(1 for c in text if (
+            '\u0020' <= c <= '\u007F') or ('\u0080' <= c <= '\u00FF'))
         chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
 
         # If there are Chinese characters, it's likely Chinese text
@@ -328,20 +329,36 @@ class MainApp(QObject):
         if self.vibevoice_manager is None:
             self.vibevoice_manager = VibeVoiceModelManager()
 
-        # Wait for any previous threads to finish
+        # Stop and wait for any previous threads to finish
+        # This prevents "QThread: Destroyed while thread is still running" errors
         if self.correction_thread is not None:
-            self.correction_thread.wait()
+            if self.correction_thread.isRunning():
+                self.correction_thread.terminate()  # Force terminate since no stop method
+                self.correction_thread.wait(1000)  # Wait up to 1 second
+            self.correction_thread = None
         if self.translation_thread is not None:
-            self.translation_thread.wait()
+            if self.translation_thread.isRunning():
+                self.translation_thread.terminate()  # Force terminate since no stop method
+                self.translation_thread.wait(1000)  # Wait up to 1 second
+            self.translation_thread = None
         if self.tts_thread is not None:
-            self.tts_thread.wait()
+            if self.tts_thread.isRunning():
+                self.tts_thread.stop()  # Request graceful stop (closes WebSocket)
+                if not self.tts_thread.wait(2000):  # Wait up to 2 seconds
+                    print("TTS thread did not stop in time, terminating...")
+                    self.tts_thread.terminate()
+                    self.tts_thread.wait(500)
+            self.tts_thread = None
 
         # Start correction thread
         self.popup_window.set_status("Correcting text...")
-        self.correction_thread = TextCorrectionThread(original_text, 'deepseek')
+        self.correction_thread = TextCorrectionThread(
+            original_text, 'deepseek')
         self.correction_thread.correction_done.connect(self.on_correction_done)
-        self.correction_thread.correction_chunk.connect(self.on_correction_chunk)
-        self.correction_thread.correction_error.connect(self.on_correction_error)
+        self.correction_thread.correction_chunk.connect(
+            self.on_correction_chunk)
+        self.correction_thread.correction_error.connect(
+            self.on_correction_error)
         self.correction_thread.start()
 
     def on_correction_chunk(self, chunk):
@@ -353,7 +370,8 @@ class MainApp(QObject):
         """Handle correction error"""
         print(f"Correction error: {error_message}")
         if self.popup_window:
-            self.popup_window.set_status(f"Correction failed: {error_message[:50]}... (using original text)")
+            self.popup_window.set_status(
+                f"Correction failed: {error_message[:50]}... (using original text)")
 
     def on_correction_done(self, corrected_text):
         """Handle correction completion"""
@@ -368,8 +386,10 @@ class MainApp(QObject):
 
         # Start translation thread
         self.translation_thread = TranslationThread(corrected_text, 'deepseek')
-        self.translation_thread.translation_done.connect(self.on_translation_done)
-        self.translation_thread.translation_chunk.connect(self.on_translation_chunk)
+        self.translation_thread.translation_done.connect(
+            self.on_translation_done)
+        self.translation_thread.translation_chunk.connect(
+            self.on_translation_chunk)
         self.translation_thread.start()
 
     def on_translation_chunk(self, chunk):
@@ -420,7 +440,8 @@ class MainApp(QObject):
             self.tts_thread.tts_error.connect(self.on_tts_error)
             self.tts_thread.progress_update.connect(self.on_tts_progress)
             # Connect audio chunk signal for real-time streaming playback
-            self.tts_thread.audio_chunk_ready.connect(self.on_audio_chunk_ready)
+            self.tts_thread.audio_chunk_ready.connect(
+                self.on_audio_chunk_ready)
             self.tts_thread.start()
         except Exception as e:
             print(f"Failed to start TTS: {e}")
@@ -492,8 +513,10 @@ class MainApp(QObject):
             try:
                 self.tts_thread.tts_completed.disconnect(self.on_tts_completed)
                 self.tts_thread.tts_error.disconnect(self.on_tts_error)
-                self.tts_thread.progress_update.disconnect(self.on_tts_progress)
-                self.tts_thread.audio_chunk_ready.disconnect(self.on_audio_chunk_ready)
+                self.tts_thread.progress_update.disconnect(
+                    self.on_tts_progress)
+                self.tts_thread.audio_chunk_ready.disconnect(
+                    self.on_audio_chunk_ready)
             except:
                 pass
         # Clear popup reference
@@ -506,13 +529,24 @@ class MainApp(QObject):
         if self.popup_window is not None:
             self.popup_window.close()
 
-        # Wait for threads to finish
+        # Stop and wait for threads to finish
         if self.correction_thread is not None:
-            self.correction_thread.wait()
+            if self.correction_thread.isRunning():
+                self.correction_thread.terminate()
+                self.correction_thread.wait(1000)
+            self.correction_thread = None
         if self.translation_thread is not None:
-            self.translation_thread.wait()
+            if self.translation_thread.isRunning():
+                self.translation_thread.terminate()
+                self.translation_thread.wait(1000)
+            self.translation_thread = None
         if self.tts_thread is not None:
-            self.tts_thread.wait()
+            if self.tts_thread.isRunning():
+                self.tts_thread.stop()  # Request graceful stop
+                if not self.tts_thread.wait(2000):
+                    self.tts_thread.terminate()
+                    self.tts_thread.wait(500)
+            self.tts_thread = None
 
         # Cleanup
         self.shortcut_handler.stop()

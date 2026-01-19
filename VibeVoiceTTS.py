@@ -1,3 +1,12 @@
+import copy
+from vibevoice.modular.streamer import AudioStreamer
+from vibevoice.processor.vibevoice_streaming_processor import (
+    VibeVoiceStreamingProcessor,
+)
+from vibevoice.modular.modeling_vibevoice_streaming_inference import (
+    VibeVoiceStreamingForConditionalGenerationInference,
+)
+import sys
 import os
 import tempfile
 import threading
@@ -10,31 +19,22 @@ import numpy as np
 import torch
 from PySide6.QtCore import Signal, QThread
 
-# Suppress tokenizer class mismatch warning - this is expected since 
+# Suppress tokenizer class mismatch warning - this is expected since
 # VibeVoiceTextTokenizerFast extends Qwen2TokenizerFast
-warnings.filterwarnings('ignore', message='.*tokenizer class you load from this checkpoint is not the same type.*')
+warnings.filterwarnings(
+    'ignore', message='.*tokenizer class you load from this checkpoint is not the same type.*')
 
 # Add VibeVoice to path
-import sys
 vibevoice_path = Path(__file__).parent / "VibeVoice"
 sys.path.insert(0, str(vibevoice_path))
-
-from vibevoice.modular.modeling_vibevoice_streaming_inference import (
-    VibeVoiceStreamingForConditionalGenerationInference,
-)
-from vibevoice.processor.vibevoice_streaming_processor import (
-    VibeVoiceStreamingProcessor,
-)
-from vibevoice.modular.streamer import AudioStreamer
-
-import copy
 
 
 class VibeVoiceTTS(QThread):
     tts_completed = Signal(str)  # Signal to emit audio file path
     tts_error = Signal(str)  # Signal for error messages
     progress_update = Signal(str)  # Signal for progress updates
-    audio_chunk_ready = Signal(bytes, int)  # Signal for streaming: (audio_bytes, sample_rate)
+    # Signal for streaming: (audio_bytes, sample_rate)
+    audio_chunk_ready = Signal(bytes, int)
 
     def __init__(self, text, model_path="microsoft/VibeVoice-Realtime-0.5B", device="cuda", voice_preset="en-Carter_man", streaming=False):
         super().__init__()
@@ -54,6 +54,13 @@ class VibeVoiceTTS(QThread):
         self._voice_presets = {}
         self._model_loaded = False
 
+        # Control flags for stopping
+        self._stop_requested = False
+
+    def stop(self):
+        """Request to stop TTS generation"""
+        self._stop_requested = True
+
     def _load_model(self):
         """Load the VibeVoice model and processor"""
         if self._model_loaded:
@@ -63,7 +70,8 @@ class VibeVoiceTTS(QThread):
             self.progress_update.emit("Loading VibeVoice model...")
 
             # Load processor
-            self._processor = VibeVoiceStreamingProcessor.from_pretrained(self.model_path)
+            self._processor = VibeVoiceStreamingProcessor.from_pretrained(
+                self.model_path)
 
             # Determine device settings
             if self.device == "mps":
@@ -98,7 +106,8 @@ class VibeVoiceTTS(QThread):
                 algorithm_type="sde-dpmsolver++",
                 beta_schedule="squaredcos_cap_v2",
             )
-            self._model.set_ddpm_inference_steps(num_steps=self.inference_steps)
+            self._model.set_ddpm_inference_steps(
+                num_steps=self.inference_steps)
 
             # Load voice presets
             self._load_voice_presets()
@@ -112,7 +121,8 @@ class VibeVoiceTTS(QThread):
 
     def _load_voice_presets(self):
         """Load available voice presets"""
-        voices_dir = Path(__file__).parent / "VibeVoice" / "demo" / "voices" / "streaming_model"
+        voices_dir = Path(__file__).parent / "VibeVoice" / \
+            "demo" / "voices" / "streaming_model"
         if not voices_dir.exists():
             print(f"Warning: Voices directory not found: {voices_dir}")
             self._voice_presets = {}
@@ -131,7 +141,8 @@ class VibeVoiceTTS(QThread):
         else:
             self._default_voice_key = None
 
-        print(f"Found {len(self._voice_presets)} voice presets, using: {self._default_voice_key}")
+        print(
+            f"Found {len(self._voice_presets)} voice presets, using: {self._default_voice_key}")
 
     def _get_voice_resources(self, voice_key=None):
         """Get voice preset resources"""
@@ -165,7 +176,8 @@ class VibeVoiceTTS(QThread):
             "return_attention_mask": True,
         }
 
-        processed = self._processor.process_input_with_cached_prompt(**processor_kwargs)
+        processed = self._processor.process_input_with_cached_prompt(
+            **processor_kwargs)
         torch_device = torch.device(self.device)
 
         prepared = {
@@ -203,7 +215,8 @@ class VibeVoiceTTS(QThread):
         inputs = self._prepare_inputs(text, prefilled_outputs)
 
         # Create audio streamer
-        audio_streamer = AudioStreamer(batch_size=1, stop_signal=None, timeout=None)
+        audio_streamer = AudioStreamer(
+            batch_size=1, stop_signal=None, timeout=None)
         errors = []
         stop_event = threading.Event()
         audio_chunks = []
@@ -285,7 +298,8 @@ class VibeVoiceTTS(QThread):
         inputs = self._prepare_inputs(text, prefilled_outputs)
 
         # Create audio streamer
-        audio_streamer = AudioStreamer(batch_size=1, stop_signal=None, timeout=None)
+        audio_streamer = AudioStreamer(
+            batch_size=1, stop_signal=None, timeout=None)
         errors = []
         stop_event = threading.Event()
 
@@ -369,7 +383,8 @@ class VibeVoiceTTS(QThread):
             if not self._model_loaded:
                 self._load_model()
 
-            self.progress_update.emit(f"Generating TTS for: {self.text[:50]}...")
+            self.progress_update.emit(
+                f"Generating TTS for: {self.text[:50]}...")
 
             # Generate audio
             audio_data = self._generate_audio(self.text)
