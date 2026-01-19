@@ -523,6 +523,10 @@ class PopupWindow(QWidget):
 
     def update_dictionary_display(self):
         """Update dictionary display with rendered markdown"""
+        # Save current scroll position before updating
+        scrollbar = self.dictionary_display.verticalScrollBar()
+        scroll_position = scrollbar.value()
+
         if HAS_MARKDOWN:
             # Convert markdown to HTML with extensions
             html_content = markdown.markdown(
@@ -545,6 +549,9 @@ class PopupWindow(QWidget):
         else:
             # Fallback to plain text
             self.dictionary_display.setPlainText(self._dictionary_markdown)
+
+        # Restore scroll position
+        scrollbar.setValue(scroll_position)
 
     def on_dictionary_done(self, result):
         """Handle dictionary translation completion"""
