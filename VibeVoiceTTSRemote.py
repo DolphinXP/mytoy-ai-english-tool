@@ -22,12 +22,12 @@ class VibeVoiceTTSRemote(QThread):
     # Signal for streaming: (audio_bytes, sample_rate)
     audio_chunk_ready = Signal(bytes, int)
 
-    def __init__(self, text, server_url="ws://10.110.31.157:3000/stream", streaming=False, voice_preset="en-Carter_man"):
+    def __init__(self, text, server_url="ws://10.110.31.157:3000/stream", streaming=False, voice_preset="en-Emma_woman"):
         super().__init__()
         self.text = text
         self.server_url = server_url
         self.streaming = streaming
-        # Voice preset to use (e.g., "en-Carter_man")
+        # Voice preset to use (e.g., "en-Emma_woman")
         self.voice_preset = voice_preset
         self.sample_rate = 24000  # Standard sample rate for VibeVoice
 
@@ -293,7 +293,7 @@ class VibeVoiceTTSRemoteManager:
             return
         self._initialized = True
         self._server_url = "ws://10.110.31.157:3000/stream"  # Default server
-        self._voice_preset = "en-Carter_man"  # Default voice preset
+        self._voice_preset = "en-Emma_woman"  # Default voice preset
 
     def set_server_url(self, url):
         """Set the remote server URL"""
