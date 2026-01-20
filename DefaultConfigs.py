@@ -2,9 +2,9 @@
 # Default API configurations
 default_configs = {
     'deepseek': {
-        'endpoint': "https://api.deepseek.com",
+        'endpoint': "https://integrate.api.nvidia.com/v1",
         'key': "YOUR_API_KEY_HERE",
-        'model': "deepseek-chat",
+        'model': "moonshotai/kimi-k2-instruct-0905",
         # None, "http://127.0.0.1:18080", "http://127.0.0.1:1080"
         'proxy': None,
         'timeout': 60.0,  # Increased timeout
