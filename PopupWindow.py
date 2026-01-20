@@ -630,6 +630,12 @@ class PopupWindow(QWidget):
         self.progress_timer.stop()
         self._streaming_done = False
         self._drain_idle_ticks = 0
+
+        # Reset progress bar to determinate mode
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        self.update_time_display()
+
         print("Streaming playback stopped")
 
     # --- File-based Audio Methods ---
@@ -652,19 +658,9 @@ class PopupWindow(QWidget):
         self.play_stop_btn.setEnabled(True)
         self.update_time_display()
 
-        if self.is_streaming:
-            return
-
-        # Auto-start playback from streaming position if we have one
-        print(
-            f"Checking resume conditions: is_playing={self.is_playing}, streaming_position_at_end={self.streaming_position_at_end:.2f}")
-        if not self.is_playing and self.streaming_position_at_end >= 0.1:
-            print(
-                f"Resuming playback from {self.streaming_position_at_end:.2f} seconds")
-            self.start_playback_from_position(self.streaming_position_at_end)
-        elif not self.is_playing:
-            print("Starting playback from beginning")
-            self.start_playback()
+        # Do not auto-start file playback if streaming was enabled
+        # We only want to play the streaming audio
+        pass
 
     def set_audio_error(self, error_message):
         """Called when audio generation fails"""
@@ -846,16 +842,11 @@ class PopupWindow(QWidget):
                     self._drain_idle_ticks = 0
 
                 if self._drain_idle_ticks >= 3:
-                    print("Streaming playback drained, switching to file")
+                    print("Streaming playback completed")
                     self.stop_streaming_playback(wait_for_completion=False)
                     self._streaming_done = False
                     self._drain_idle_ticks = 0
                     self.status_label.setText("✅ Audio ready")
-                    if self.streaming_position_at_end >= 0.1:
-                        self.start_playback_from_position(
-                            self.streaming_position_at_end)
-                    else:
-                        self.start_playback()
                     return
 
         elif self.is_playing:
