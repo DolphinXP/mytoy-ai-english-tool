@@ -374,13 +374,13 @@ class MainApp(QObject):
                 f"Correction failed: {error_message[:50]}... (using original text)")
 
     def on_correction_done(self, corrected_text):
-        """Handle correction completion"""
+        """Handle correction completion - start translation and TTS in parallel"""
         print(f"Correction completed: {corrected_text[:50]}...")
 
         # Update popup with corrected text
         if self.popup_window:
             self.popup_window.update_corrected_text(corrected_text)
-            self.popup_window.set_status("Translating text...")
+            self.popup_window.set_status("Translating and generating audio...")
 
         self.correction_thread = None
 
@@ -392,26 +392,29 @@ class MainApp(QObject):
             self.on_translation_chunk)
         self.translation_thread.start()
 
+        # Start TTS thread in parallel (using corrected text)
+        self._start_tts(corrected_text)
+
     def on_translation_chunk(self, chunk):
         """Handle streaming translation chunk"""
         if self.popup_window:
             self.popup_window.append_translated_chunk(chunk)
 
     def on_translation_done(self, translated_text):
-        """Handle translation completion"""
+        """Handle translation completion (TTS is already running in parallel)"""
         print(f"Translation completed: {translated_text[:50]}...")
 
         # Update popup with translated text
         if self.popup_window:
             self.popup_window.update_translated_text(translated_text)
-            self.popup_window.set_status("Generating audio...")
+            # Only update status if TTS is still running
+            if self.tts_thread is not None and self.tts_thread.isRunning():
+                self.popup_window.set_status("Translation done. Generating audio...")
 
         self.translation_thread = None
 
-        # Always use the corrected text for TTS (it's the AI-corrected English text)
-        tts_text = self.popup_window.corrected_text if self.popup_window else ""
-
-        # Start TTS thread with streaming enabled
+    def _start_tts(self, tts_text):
+        """Start TTS thread with the given text"""
         try:
             # Use remote or local TTS based on user selection
             if self.tts_server_type == "remote":
