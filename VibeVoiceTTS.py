@@ -36,7 +36,7 @@ class VibeVoiceTTS(QThread):
     # Signal for streaming: (audio_bytes, sample_rate)
     audio_chunk_ready = Signal(bytes, int)
 
-    def __init__(self, text, model_path="microsoft/VibeVoice-Realtime-0.5B", device="cuda", voice_preset="en-Carter_man", streaming=False):
+    def __init__(self, text, model_path="microsoft/VibeVoice-Realtime-0.5B", device="cuda", voice_preset="en-Emman_woman", streaming=False):
         super().__init__()
         self.text = text
         self.model_path = model_path
@@ -131,11 +131,11 @@ class VibeVoiceTTS(QThread):
         for pt_path in voices_dir.rglob("*.pt"):
             self._voice_presets[pt_path.stem] = pt_path
 
-        # Set default voice to en-Carter_man
+        # Set default voice to en-Emman_woman
         if self.voice_preset and self.voice_preset in self._voice_presets:
             self._default_voice_key = self.voice_preset
-        elif "en-Carter_man" in self._voice_presets:
-            self._default_voice_key = "en-Carter_man"
+        elif "en-Emman_woman" in self._voice_presets:
+            self._default_voice_key = "en-Emman_woman"
         elif self._voice_presets:
             self._default_voice_key = next(iter(self._voice_presets))
         else:

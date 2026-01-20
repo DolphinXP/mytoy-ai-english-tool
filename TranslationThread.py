@@ -89,8 +89,11 @@ class TranslationThread(QThread):
 
             self.full_translation = ""
             for chunk in response:
-                if chunk.choices[0].delta.content is not None:
-                    chunk_text = chunk.choices[0].delta.content
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta is not None and delta.content is not None:
+                    chunk_text = delta.content
                     self.full_translation += chunk_text
                     self.translation_chunk.emit(chunk_text)
 
