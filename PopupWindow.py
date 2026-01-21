@@ -8,8 +8,11 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QTextBrowser,
     QPushButton, QProgressBar, QLabel, QSystemTrayIcon, QMenu, QApplication
 )
-from PySide6.QtCore import QTimer, QSettings, Qt as _Qt, Signal, QEvent
-from PySide6.QtGui import QFont, QIcon, QAction, QMouseEvent, QTextCursor, QCursor
+from PySide6.QtCore import QTimer, QSettings, Qt as _Qt, Signal, QEvent, QSize
+from PySide6.QtGui import (
+    QFont, QIcon, QAction, QMouseEvent, QTextCursor, QCursor,
+    QFontDatabase, QPixmap, QPainter, QColor
+)
 import pygame
 
 try:
@@ -215,6 +218,9 @@ class PopupWindow(QWidget):
         self._icons = self._get_icon_texts()
         self._translating_prefix = self._icon_label(
             "translating", "Translating:")
+        self._menu_icon_font_family = self._get_menu_icon_font_family()
+        self._menu_glyphs = self._get_menu_glyphs()
+        self._button_glyphs = self._get_button_glyphs()
 
         self.init_ui()
         self.restore_position()
@@ -263,9 +269,81 @@ class PopupWindow(QWidget):
             return f"{icon} {text}"
         return text
 
+    def _get_menu_icon_font_family(self):
+        if os.name != "nt":
+            return ""
+        families = set(QFontDatabase.families())
+        if "Segoe MDL2 Assets" in families:
+            return "Segoe MDL2 Assets"
+        return ""
+
+    def _get_menu_glyphs(self):
+        if not self._menu_icon_font_family:
+            return {}
+        # Use Segoe MDL2 Assets glyphs for consistent look on Windows 10/11.
+        return {
+            "copy": "\uE8C8",
+            "select_all": "\uE8B3",
+            "translate": "\uE721",
+        }
+
+    def _get_button_glyphs(self):
+        if not self._menu_icon_font_family:
+            return {}
+        return {
+            "power": "\uE7E8",
+            "play": "\uE768",
+            "stop": "\uE769",
+            "close": "\uE711",
+        }
+
+    def _make_menu_icon(self, glyph):
+        if not glyph or not self._menu_icon_font_family:
+            return QIcon()
+        font = QFont(self._menu_icon_font_family, 12)
+        pixmap = QPixmap(16, 16)
+        pixmap.fill(_Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setFont(font)
+        painter.setPen(QColor(40, 40, 40))
+        painter.drawText(pixmap.rect(), _Qt.AlignCenter, glyph)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _make_button_icon(self, glyph):
+        if not glyph or not self._menu_icon_font_family:
+            return QIcon()
+        font = QFont(self._menu_icon_font_family, 14)
+        pixmap = QPixmap(18, 18)
+        pixmap.fill(_Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setFont(font)
+        painter.setPen(QColor(40, 40, 40))
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        painter.drawText(pixmap.rect(), _Qt.AlignCenter, glyph)
+        painter.end()
+        return QIcon(pixmap)
+
+    def _set_button_icon(self, button, key):
+        glyph = self._button_glyphs.get(key, "")
+        icon = self._make_button_icon(glyph)
+        if not icon.isNull():
+            button.setIcon(icon)
+            button.setIconSize(QSize(16, 16))
+        else:
+            button.setIcon(QIcon())
+
+    def _set_play_button_state(self, is_playing):
+        if is_playing:
+            self.play_stop_btn.setText("Stop")
+            self._set_button_icon(self.play_stop_btn, "stop")
+        else:
+            self.play_stop_btn.setText("Play English Audio")
+            self._set_button_icon(self.play_stop_btn, "play")
+
     def _style_menu(self, menu):
         menu.setStyleSheet("""
-            QMenu::icon { width: 0px; height: 0px; }
+            QMenu::icon { width: 18px; height: 18px; }
             QMenu::item { padding: 4px 10px; }
             QMenu::item:selected {
                 background-color: #e9ecef;
@@ -288,8 +366,7 @@ class PopupWindow(QWidget):
         top_bar_layout.addStretch()
 
         # Exit Program button (exits entire application)
-        self.exit_app_btn = QPushButton(
-            self._icon_label("power", "Exit Program"))
+        self.exit_app_btn = QPushButton("Exit Program")
         self.exit_app_btn.setStyleSheet("""
             QPushButton {
                 background-color: #dc3545;
@@ -303,6 +380,7 @@ class PopupWindow(QWidget):
                 background-color: #c82333;
             }
         """)
+        self._set_button_icon(self.exit_app_btn, "power")
         self.exit_app_btn.clicked.connect(self.request_exit_app)
         top_bar_layout.addWidget(self.exit_app_btn)
 
@@ -412,9 +490,9 @@ class PopupWindow(QWidget):
         controls_layout = QHBoxLayout()
 
         # Play/Stop button
-        self.play_stop_btn = QPushButton(
-            self._icon_label("play", "Play English Audio"))
+        self.play_stop_btn = QPushButton("Play English Audio")
         self.play_stop_btn.setEnabled(False)
+        self._set_play_button_state(False)
         self.play_stop_btn.clicked.connect(self.toggle_playback)
         controls_layout.addWidget(self.play_stop_btn)
 
@@ -425,7 +503,8 @@ class PopupWindow(QWidget):
         controls_layout.addStretch()
 
         # Close button
-        self.close_btn = QPushButton(self._icon_label("close", "Close"))
+        self.close_btn = QPushButton("Close")
+        self._set_button_icon(self.close_btn, "close")
         self.close_btn.clicked.connect(self.close)
         controls_layout.addWidget(self.close_btn)
 
@@ -489,6 +568,9 @@ class PopupWindow(QWidget):
             self._style_menu(menu)
             translate_action = QAction(
                 self._icon_label("search", "Translate to Dictionary"), self)
+            if "translate" in self._menu_glyphs:
+                translate_action.setIcon(
+                    self._make_menu_icon(self._menu_glyphs["translate"]))
             translate_action.triggered.connect(
                 lambda: self.translate_selected(text_edit))
             menu.addAction(translate_action)
@@ -551,12 +633,18 @@ class PopupWindow(QWidget):
 
         # Add Copy action
         copy_action = QAction("Copy", self)
+        if "copy" in self._menu_glyphs:
+            copy_action.setIcon(
+                self._make_menu_icon(self._menu_glyphs["copy"]))
         copy_action.triggered.connect(text_edit.copy)
         copy_action.setEnabled(cursor.hasSelection())
         menu.addAction(copy_action)
 
         # Add Select All action
         select_all_action = QAction("Select All", self)
+        if "select_all" in self._menu_glyphs:
+            select_all_action.setIcon(
+                self._make_menu_icon(self._menu_glyphs["select_all"]))
         select_all_action.triggered.connect(text_edit.selectAll)
         menu.addAction(select_all_action)
 
@@ -565,6 +653,9 @@ class PopupWindow(QWidget):
         # Add Translate action
         translate_action = QAction(
             self._icon_label("search", "Translate to Dictionary"), self)
+        if "translate" in self._menu_glyphs:
+            translate_action.setIcon(
+                self._make_menu_icon(self._menu_glyphs["translate"]))
         translate_action.triggered.connect(
             lambda: self.translate_selected(text_edit))
         translate_action.setEnabled(cursor.hasSelection())
@@ -694,7 +785,7 @@ class PopupWindow(QWidget):
         self.streaming_player = StreamingAudioPlayer(sample_rate=24000)
         self.streaming_player.start()
         self.is_playing = True
-        self.play_stop_btn.setText(self._icon_label("stop", "Stop"))
+        self._set_play_button_state(True)
         self.play_stop_btn.setEnabled(True)
         self.progress_timer.start(100)
         self.set_status(self._icon_label("audio", "Streaming audio..."))
@@ -749,8 +840,7 @@ class PopupWindow(QWidget):
             self.streaming_player = None
         self.is_streaming = False
         self.is_playing = False
-        self.play_stop_btn.setText(
-            self._icon_label("play", "Play English Audio"))
+        self._set_play_button_state(False)
         self.progress_timer.stop()
         self._streaming_done = False
         self._drain_idle_ticks = 0
@@ -830,7 +920,7 @@ class PopupWindow(QWidget):
             pygame.mixer.music.play()
 
             self.is_playing = True
-            self.play_stop_btn.setText(self._icon_label("stop", "Stop"))
+            self._set_play_button_state(True)
             self.current_position = 0
 
             # Start the progress timer
@@ -891,7 +981,7 @@ class PopupWindow(QWidget):
             self._temp_audio_file = temp_path
 
             self.is_playing = True
-            self.play_stop_btn.setText(self._icon_label("stop", "Stop"))
+            self._set_play_button_state(True)
             self.current_position = start_seconds
 
             # Store offset for progress tracking
@@ -937,8 +1027,7 @@ class PopupWindow(QWidget):
             self._sound = None
 
         self.is_playing = False
-        self.play_stop_btn.setText(
-            self._icon_label("play", "Play English Audio"))
+        self._set_play_button_state(False)
         self.progress_timer.stop()
         self.current_position = 0
         self.streaming_position_at_end = 0  # Reset streaming position
