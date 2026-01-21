@@ -185,6 +185,7 @@ class PopupWindow(QWidget):
         self.corrected_text = ""
         self.translated_text = ""
         self.dictionary_thread = None  # For quick dictionary translation
+        self._orphan_dictionary_threads = []
 
         self.is_playing = False
         self.audio_file_path = None
@@ -534,11 +535,11 @@ class PopupWindow(QWidget):
                 pass
             # Request thread to stop
             self.dictionary_thread.stop()
-            # Wait for thread to finish (with timeout)
-            if not self.dictionary_thread.wait(500):  # 500ms timeout
-                print("Dictionary thread did not finish in time, terminating...")
-                self.dictionary_thread.terminate()
-                self.dictionary_thread.wait(200)
+            # Let it finish on its own without blocking UI responsiveness
+            self.dictionary_thread.finished.connect(
+                lambda: self._cleanup_orphan_dictionary_thread())
+            self._orphan_dictionary_threads.append(self.dictionary_thread)
+            self.dictionary_thread = None
 
         # Start dictionary translation thread
         from DictionaryThread import DictionaryThread
@@ -548,6 +549,12 @@ class PopupWindow(QWidget):
         self.dictionary_thread.translation_done.connect(
             self.on_dictionary_done)
         self.dictionary_thread.start()
+
+    def _cleanup_orphan_dictionary_thread(self):
+        """Remove finished dictionary threads that were detached."""
+        self._orphan_dictionary_threads = [
+            t for t in self._orphan_dictionary_threads if t.isRunning()
+        ]
 
     def on_dictionary_chunk(self, chunk):
         """Handle streaming dictionary chunk"""
