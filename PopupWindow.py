@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 import time
 import queue
@@ -211,9 +212,66 @@ class PopupWindow(QWidget):
             pygame.mixer.quit()
             pygame.mixer.init()
 
+        self._icons = self._get_icon_texts()
+        self._translating_prefix = self._icon_label(
+            "translating", "Translating:")
+
         self.init_ui()
         self.restore_position()
         self.setup_auto_close_timer()
+
+    def _is_windows_11_or_newer(self):
+        if os.name != "nt":
+            return True
+        try:
+            return sys.getwindowsversion().build >= 22000
+        except Exception:
+            return True
+
+    def _get_icon_texts(self):
+        if self._is_windows_11_or_newer():
+            return {
+                "power": "⏻",
+                "dictionary": "📖",
+                "close": "✕",
+                "search": "🔍",
+                "translating": "🔄",
+                "play": "▶",
+                "stop": "⏸",
+                "audio": "🔊",
+                "ready": "✅",
+                "error": "❌",
+            }
+
+        # Windows 10 emoji rendering can look inconsistent; use text-only labels.
+        return {
+            "power": "",
+            "dictionary": "",
+            "close": "",
+            "search": "",
+            "translating": "",
+            "play": "",
+            "stop": "",
+            "audio": "",
+            "ready": "",
+            "error": "",
+        }
+
+    def _icon_label(self, key, text):
+        icon = self._icons.get(key, "")
+        if icon:
+            return f"{icon} {text}"
+        return text
+
+    def _style_menu(self, menu):
+        menu.setStyleSheet("""
+            QMenu::icon { width: 0px; height: 0px; }
+            QMenu::item { padding: 4px 10px; }
+            QMenu::item:selected {
+                background-color: #e9ecef;
+                color: #111;
+            }
+        """)
 
     def init_ui(self):
         self.setWindowTitle("AI-TTS - Text Correction, Translation & TTS")
@@ -230,7 +288,8 @@ class PopupWindow(QWidget):
         top_bar_layout.addStretch()
 
         # Exit Program button (exits entire application)
-        self.exit_app_btn = QPushButton("⏻ Exit Program")
+        self.exit_app_btn = QPushButton(
+            self._icon_label("power", "Exit Program"))
         self.exit_app_btn.setStyleSheet("""
             QPushButton {
                 background-color: #dc3545;
@@ -307,7 +366,8 @@ class PopupWindow(QWidget):
         layout.addWidget(self.translated_text_display)
 
         # Quick Dictionary section (replaces English Text for TTS)
-        dictionary_label = QLabel("📖 Quick Dictionary:")
+        dictionary_label = QLabel(
+            self._icon_label("dictionary", "Quick Dictionary:"))
         dictionary_label.setFont(title_font)
         layout.addWidget(dictionary_label)
 
@@ -352,7 +412,8 @@ class PopupWindow(QWidget):
         controls_layout = QHBoxLayout()
 
         # Play/Stop button
-        self.play_stop_btn = QPushButton("▶ Play English Audio")
+        self.play_stop_btn = QPushButton(
+            self._icon_label("play", "Play English Audio"))
         self.play_stop_btn.setEnabled(False)
         self.play_stop_btn.clicked.connect(self.toggle_playback)
         controls_layout.addWidget(self.play_stop_btn)
@@ -364,7 +425,7 @@ class PopupWindow(QWidget):
         controls_layout.addStretch()
 
         # Close button
-        self.close_btn = QPushButton("✕ Close")
+        self.close_btn = QPushButton(self._icon_label("close", "Close"))
         self.close_btn.clicked.connect(self.close)
         controls_layout.addWidget(self.close_btn)
 
@@ -425,7 +486,9 @@ class PopupWindow(QWidget):
 
             # Create a mini menu with just translate option
             menu = QMenu(self)
-            translate_action = QAction("🔍 Translate to Dictionary", self)
+            self._style_menu(menu)
+            translate_action = QAction(
+                self._icon_label("search", "Translate to Dictionary"), self)
             translate_action.triggered.connect(
                 lambda: self.translate_selected(text_edit))
             menu.addAction(translate_action)
@@ -480,6 +543,7 @@ class PopupWindow(QWidget):
     def show_context_menu(self, text_edit, pos):
         """Show custom context menu with Translate option"""
         menu = QMenu(self)
+        self._style_menu(menu)
 
         # Get selected text
         cursor = text_edit.textCursor()
@@ -499,7 +563,8 @@ class PopupWindow(QWidget):
         menu.addSeparator()
 
         # Add Translate action
-        translate_action = QAction("🔍 Translate to Dictionary", self)
+        translate_action = QAction(
+            self._icon_label("search", "Translate to Dictionary"), self)
         translate_action.triggered.connect(
             lambda: self.translate_selected(text_edit))
         translate_action.setEnabled(cursor.hasSelection())
@@ -522,24 +587,12 @@ class PopupWindow(QWidget):
         # Show loading state
         self._dictionary_markdown = ""
         self.dictionary_display.setPlainText(
-            f"🔄 Translating: {selected_text}...")
+            f"{self._translating_prefix} {selected_text}...")
 
         # Clean up any existing dictionary thread before starting a new one
         if self.dictionary_thread and self.dictionary_thread.isRunning():
             print("Stopping previous dictionary thread...")
-            try:
-                # Disconnect signals to prevent updates from old thread
-                self.dictionary_thread.translation_chunk.disconnect()
-                self.dictionary_thread.translation_done.disconnect()
-            except:
-                pass
-            # Request thread to stop
-            self.dictionary_thread.stop()
-            # Let it finish on its own without blocking UI responsiveness
-            self.dictionary_thread.finished.connect(
-                lambda: self._cleanup_orphan_dictionary_thread())
-            self._orphan_dictionary_threads.append(self.dictionary_thread)
-            self.dictionary_thread = None
+            self._stop_dictionary_thread(immediate=True)
 
         # Start dictionary translation thread
         from DictionaryThread import DictionaryThread
@@ -550,6 +603,26 @@ class PopupWindow(QWidget):
             self.on_dictionary_done)
         self.dictionary_thread.start()
 
+    def _stop_dictionary_thread(self, immediate=False):
+        """Stop the running dictionary thread with an optional hard stop."""
+        if not self.dictionary_thread or not self.dictionary_thread.isRunning():
+            return
+        try:
+            self.dictionary_thread.translation_chunk.disconnect()
+            self.dictionary_thread.translation_done.disconnect()
+        except:
+            pass
+        self.dictionary_thread.stop()
+        if immediate:
+            if not self.dictionary_thread.wait(150):
+                self.dictionary_thread.terminate()
+                self.dictionary_thread.wait(150)
+        else:
+            self.dictionary_thread.finished.connect(
+                lambda: self._cleanup_orphan_dictionary_thread())
+            self._orphan_dictionary_threads.append(self.dictionary_thread)
+        self.dictionary_thread = None
+
     def _cleanup_orphan_dictionary_thread(self):
         """Remove finished dictionary threads that were detached."""
         self._orphan_dictionary_threads = [
@@ -559,7 +632,7 @@ class PopupWindow(QWidget):
     def on_dictionary_chunk(self, chunk):
         """Handle streaming dictionary chunk"""
         # Accumulate markdown
-        if self._dictionary_markdown == "" and self.dictionary_display.toPlainText().startswith("🔄 Translating:"):
+        if self._dictionary_markdown == "" and self.dictionary_display.toPlainText().startswith(self._translating_prefix):
             self._dictionary_markdown = ""
 
         self._dictionary_markdown += chunk
@@ -621,10 +694,10 @@ class PopupWindow(QWidget):
         self.streaming_player = StreamingAudioPlayer(sample_rate=24000)
         self.streaming_player.start()
         self.is_playing = True
-        self.play_stop_btn.setText("⏸ Stop")
+        self.play_stop_btn.setText(self._icon_label("stop", "Stop"))
         self.play_stop_btn.setEnabled(True)
         self.progress_timer.start(100)
-        self.set_status("🔊 Streaming audio...")
+        self.set_status(self._icon_label("audio", "Streaming audio..."))
         print("Streaming playback started")
 
     def on_audio_chunk_ready(self, audio_bytes, sample_rate):
@@ -641,7 +714,11 @@ class PopupWindow(QWidget):
 
         # Update status with chunk count
         self.set_status(
-            f"🔊 Streaming audio... ({self.streaming_chunks_received} chunks)")
+            self._icon_label(
+                "audio",
+                f"Streaming audio... ({self.streaming_chunks_received} chunks)"
+            )
+        )
 
     def stop_streaming_playback(self, wait_for_completion=False):
         """Stop streaming audio playback and save final position
@@ -672,7 +749,8 @@ class PopupWindow(QWidget):
             self.streaming_player = None
         self.is_streaming = False
         self.is_playing = False
-        self.play_stop_btn.setText("▶ Play English Audio")
+        self.play_stop_btn.setText(
+            self._icon_label("play", "Play English Audio"))
         self.progress_timer.stop()
         self._streaming_done = False
         self._drain_idle_ticks = 0
@@ -700,7 +778,7 @@ class PopupWindow(QWidget):
             self.status_label.setText("Draining audio buffer...")
             self._streaming_done = True
         else:
-            self.status_label.setText("✅ Audio ready")
+            self.status_label.setText(self._icon_label("ready", "Audio ready"))
         self.play_stop_btn.setEnabled(True)
         self.update_time_display()
 
@@ -710,7 +788,8 @@ class PopupWindow(QWidget):
 
     def set_audio_error(self, error_message):
         """Called when audio generation fails"""
-        self.status_label.setText(f"❌ Audio error: {error_message}")
+        self.status_label.setText(
+            self._icon_label("error", f"Audio error: {error_message}"))
         self.play_stop_btn.setEnabled(False)
 
         # Stop streaming if it was active
@@ -751,7 +830,7 @@ class PopupWindow(QWidget):
             pygame.mixer.music.play()
 
             self.is_playing = True
-            self.play_stop_btn.setText("⏸ Stop")
+            self.play_stop_btn.setText(self._icon_label("stop", "Stop"))
             self.current_position = 0
 
             # Start the progress timer
@@ -812,7 +891,7 @@ class PopupWindow(QWidget):
             self._temp_audio_file = temp_path
 
             self.is_playing = True
-            self.play_stop_btn.setText("⏸ Stop")
+            self.play_stop_btn.setText(self._icon_label("stop", "Stop"))
             self.current_position = start_seconds
 
             # Store offset for progress tracking
@@ -858,7 +937,8 @@ class PopupWindow(QWidget):
             self._sound = None
 
         self.is_playing = False
-        self.play_stop_btn.setText("▶ Play English Audio")
+        self.play_stop_btn.setText(
+            self._icon_label("play", "Play English Audio"))
         self.progress_timer.stop()
         self.current_position = 0
         self.streaming_position_at_end = 0  # Reset streaming position
@@ -892,7 +972,8 @@ class PopupWindow(QWidget):
                     self.stop_streaming_playback(wait_for_completion=False)
                     self._streaming_done = False
                     self._drain_idle_ticks = 0
-                    self.status_label.setText("✅ Audio ready")
+                    self.status_label.setText(
+                        self._icon_label("ready", "Audio ready"))
                     return
 
         elif self.is_playing:

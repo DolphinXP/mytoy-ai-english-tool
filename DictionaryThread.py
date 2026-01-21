@@ -21,6 +21,8 @@ class DictionaryThread(QThread):
         self.context_text = context_text
         self.full_translation = ""
         self._is_running = True  # Flag to check if thread should continue
+        self._http_client = None
+        self._response = None
 
         # Use provided config or default to deepseek
         if api_config is None:
@@ -40,6 +42,20 @@ class DictionaryThread(QThread):
     def stop(self):
         """Request the thread to stop gracefully"""
         self._is_running = False
+        if self._response is not None:
+            try:
+                close_fn = getattr(self._response, "close", None)
+                if callable(close_fn):
+                    close_fn()
+            except Exception:
+                pass
+            self._response = None
+        if self._http_client is not None:
+            try:
+                self._http_client.close()
+            except Exception:
+                pass
+            self._http_client = None
         self.quit()
 
     def run(self):
@@ -53,6 +69,7 @@ class DictionaryThread(QThread):
                 verify=False,
                 proxy=self.proxy_url if self.proxy_url else None
             )
+            self._http_client = http_client
 
             client = OpenAI(
                 api_key=self.api_key,
@@ -128,6 +145,7 @@ Please provide a dictionary-style explanation for the selected text, considering
                 messages=messages,
                 stream=True
             )
+            self._response = response
 
             self.full_translation = ""
             for chunk in response:
@@ -145,7 +163,6 @@ Please provide a dictionary-style explanation for the selected text, considering
             if self._is_running:
                 translated_text = self.full_translation.strip()
                 self.translation_done.emit(translated_text)
-
         except httpx.ConnectError as e:
             print(f"Dictionary connection error: {e}")
             if self._is_running:
@@ -161,3 +178,12 @@ Please provide a dictionary-style explanation for the selected text, considering
             if self._is_running:
                 self.translation_chunk.emit(f"❌ Error: {e}")
                 self.translation_done.emit("")
+        finally:
+            # Ensure the streaming connection is closed to stop quickly.
+            if self._http_client is not None:
+                try:
+                    self._http_client.close()
+                except Exception:
+                    pass
+                self._http_client = None
+            self._response = None
