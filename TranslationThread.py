@@ -83,7 +83,10 @@ class TranslationThread(QThread):
             response = client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                stream=True
+                stream=True,
+                extra_body={
+                    "thinking": {"type": "disabled"}
+                }
             )
 
             self.full_translation = ""
