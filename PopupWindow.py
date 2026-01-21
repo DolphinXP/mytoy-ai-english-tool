@@ -51,6 +51,38 @@ class TranslatableTextEdit(QTextEdit):
             self.text_selected.emit()
 
 
+class TranslatableTextBrowser(QTextBrowser):
+    """Custom QTextBrowser that shows translate popup when text is selected and mouse is released"""
+    text_selected = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._last_selection = ""
+
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release - show translate popup if text is selected"""
+        # Let the parent handle the event first
+        super().mouseReleaseEvent(event)
+
+        # Check if there's a selection after mouse release
+        cursor = self.textCursor()
+        selected_text = cursor.selectedText().strip()
+
+        # Only emit if there's a new non-empty selection
+        if selected_text and selected_text != self._last_selection:
+            self._last_selection = selected_text
+            # Small delay to ensure UI is stable
+            QTimer.singleShot(50, self._emit_if_still_selected)
+        elif not selected_text:
+            self._last_selection = ""
+
+    def _emit_if_still_selected(self):
+        """Emit signal if text is still selected"""
+        cursor = self.textCursor()
+        if cursor.hasSelection():
+            self.text_selected.emit()
+
+
 class StreamingAudioPlayer:
     """Real-time audio streaming player using pyaudio"""
 
@@ -279,7 +311,7 @@ class PopupWindow(QWidget):
         layout.addWidget(dictionary_label)
 
         # Use QTextBrowser for markdown rendering
-        self.dictionary_display = QTextBrowser()
+        self.dictionary_display = TranslatableTextBrowser()
         self.dictionary_display.setFont(QFont("Microsoft YaHei", 10))
         self.dictionary_display.setPlainText(
             "Double-click a word, or select text in Corrected/Translated sections, then right-click and choose 'Translate' to see the definition here.")
@@ -293,6 +325,13 @@ class PopupWindow(QWidget):
                 padding: 8px;
             }
         """)
+        # Enable custom context menu for dictionary panel
+        self.dictionary_display.setContextMenuPolicy(_Qt.CustomContextMenu)
+        self.dictionary_display.customContextMenuRequested.connect(
+            lambda pos: self.show_context_menu(self.dictionary_display, pos))
+        # Connect text selection signal for translation popup
+        self.dictionary_display.text_selected.connect(
+            lambda: self.show_translate_menu_for_selection(self.dictionary_display))
         # Store raw markdown for updates
         self._dictionary_markdown = ""
         layout.addWidget(self.dictionary_display)
