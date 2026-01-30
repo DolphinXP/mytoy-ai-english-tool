@@ -403,11 +403,53 @@ class PopupWindow(QWidget):
         self.original_text_display.setMaximumHeight(50)
         layout.addWidget(self.original_text_display)
 
-        # Corrected text section
-        corrected_label = QLabel(
-            "AI Corrected Text (fixes PDF formatting issues):")
+        # Corrected text section with controls
+        corrected_header_layout = QHBoxLayout()
+        
+        corrected_label = QLabel("AI Corrected Text:")
         corrected_label.setFont(title_font)
-        layout.addWidget(corrected_label)
+        corrected_header_layout.addWidget(corrected_label)
+        
+        # Edit/Restore toggle button
+        self.edit_restore_btn = QPushButton("Edit")
+        self.edit_restore_btn.setMaximumWidth(70)
+        self.edit_restore_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                padding: 3px 8px;
+                border-radius: 3px;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+        """)
+        self.edit_restore_btn.clicked.connect(self.toggle_edit_restore)
+        corrected_header_layout.addWidget(self.edit_restore_btn)
+        
+        # Retranslate button
+        self.retranslate_btn = QPushButton("Retranslate")
+        self.retranslate_btn.setMaximumWidth(80)
+        self.retranslate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                padding: 3px 8px;
+                border-radius: 3px;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background-color: #1e7e34;
+            }
+        """)
+        self.retranslate_btn.clicked.connect(self.retranslate_text)
+        corrected_header_layout.addWidget(self.retranslate_btn)
+        
+        corrected_header_layout.addStretch()
+        layout.addLayout(corrected_header_layout)
 
         self.corrected_text_display = TranslatableTextEdit()
         self.corrected_text_display.setFont(QFont("Microsoft YaHei", 10))
@@ -422,6 +464,11 @@ class PopupWindow(QWidget):
         self.corrected_text_display.text_selected.connect(
             lambda: self.show_translate_menu_for_selection(self.corrected_text_display))
         layout.addWidget(self.corrected_text_display)
+        
+        # Store original corrected text for restore functionality
+        self.original_corrected_text = ""
+        self.user_edited_text = ""  # Track user's edited text
+        self.is_edit_mode = False
 
         # Translated text section
         translated_label = QLabel("Translated Text:")
@@ -601,6 +648,8 @@ class PopupWindow(QWidget):
     def update_corrected_text(self, text):
         """Update the corrected text display"""
         self.corrected_text = text
+        self.original_corrected_text = text  # Store original for restore
+        self.user_edited_text = ""  # Reset edited text when new correction arrives
         self.corrected_text_display.setPlainText(text)
 
     def append_corrected_chunk(self, chunk):
@@ -608,7 +657,12 @@ class PopupWindow(QWidget):
         current_text = self.corrected_text_display.toPlainText()
         if current_text == "Correcting...":
             current_text = ""
-        self.corrected_text_display.setPlainText(current_text + chunk)
+            self.original_corrected_text = ""  # Reset when starting new correction
+            self.user_edited_text = ""
+        
+        new_text = current_text + chunk
+        self.corrected_text_display.setPlainText(new_text)
+        self.original_corrected_text = new_text  # Update original as we stream
 
     def update_translated_text(self, text):
         """Update the translated text display"""
@@ -1114,6 +1168,159 @@ class PopupWindow(QWidget):
 
         self.time_label.setText(f"{current_time} / {total_time}")
 
+    def toggle_edit_restore(self):
+        """Simple toggle: Edit -> make editable, Restore -> restore original and read-only"""
+        if self.is_edit_mode:
+            # Currently in edit mode - restore to original and make read-only
+            self.corrected_text_display.setPlainText(self.original_corrected_text)
+            self.corrected_text = self.original_corrected_text
+            self.corrected_text_display.setReadOnly(True)
+            self.edit_restore_btn.setText("Edit")
+            self.edit_restore_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #007bff;
+                    color: white;
+                    border: none;
+                    padding: 3px 8px;
+                    border-radius: 3px;
+                    font-size: 10px;
+                }
+                QPushButton:hover {
+                    background-color: #0056b3;
+                }
+            """)
+            self.is_edit_mode = False
+        else:
+            # Currently in read-only mode - switch to edit mode with original text
+            self.corrected_text_display.setPlainText(self.original_corrected_text)
+            self.corrected_text_display.setReadOnly(False)
+            self.edit_restore_btn.setText("Restore")
+            self.edit_restore_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #dc3545;
+                    color: white;
+                    border: none;
+                    padding: 3px 8px;
+                    border-radius: 3px;
+                    font-size: 10px;
+                }
+                QPushButton:hover {
+                    background-color: #c82333;
+                }
+            """)
+            self.is_edit_mode = True
+            self.corrected_text_display.setFocus()
+
+    def retranslate_text(self):
+        """Retranslate the current corrected text and regenerate TTS"""
+        # Get current corrected text (may be edited)
+        current_corrected_text = self.corrected_text_display.toPlainText().strip()
+        
+        if not current_corrected_text:
+            return
+            
+        # Update the corrected text property
+        self.corrected_text = current_corrected_text
+        
+        # Clear current translation and show loading
+        self.translated_text_display.setPlainText("Translating...")
+        self.set_status("Retranslating and regenerating audio...")
+        
+        # Stop current audio playback
+        if self.is_streaming:
+            self.stop_streaming_playback()
+        elif self.is_playing:
+            self.stop_playback()
+            
+        # Disable play button until new audio is ready
+        self.play_stop_btn.setEnabled(False)
+        
+        # Import and start translation thread
+        from TranslationThread import TranslationThread
+        
+        # Clean up any existing translation thread
+        if hasattr(self, 'retranslation_thread') and self.retranslation_thread and self.retranslation_thread.isRunning():
+            self.retranslation_thread.terminate()
+            self.retranslation_thread.wait(1000)
+            
+        self.retranslation_thread = TranslationThread(current_corrected_text, 'deepseek')
+        self.retranslation_thread.translation_done.connect(self.on_retranslation_done)
+        self.retranslation_thread.translation_chunk.connect(self.on_retranslation_chunk)
+        self.retranslation_thread.start()
+        
+        # Start TTS thread in parallel
+        self._start_retranslate_tts(current_corrected_text)
+
+    def on_retranslation_chunk(self, chunk):
+        """Handle streaming retranslation chunk"""
+        current_text = self.translated_text_display.toPlainText()
+        if current_text == "Translating...":
+            current_text = ""
+        self.translated_text_display.setPlainText(current_text + chunk)
+
+    def on_retranslation_done(self, translated_text):
+        """Handle retranslation completion"""
+        print(f"Retranslation completed: {translated_text[:50]}...")
+        self.translated_text = translated_text
+        self.translated_text_display.setPlainText(translated_text)
+        
+        # Only update status if TTS is still running
+        if hasattr(self, 'retranslate_tts_thread') and self.retranslate_tts_thread and self.retranslate_tts_thread.isRunning():
+            self.set_status("Retranslation done. Generating audio...")
+        
+        self.retranslation_thread = None
+
+    def _start_retranslate_tts(self, tts_text):
+        """Start TTS thread for retranslation"""
+        try:
+            # Import the main app to access TTS managers
+            # We need to get the TTS configuration from the main app
+            # For now, we'll use a simple approach by importing the managers directly
+            from VibeVoiceTTSRemote import VibeVoiceTTSRemoteManager
+            from VibeVoiceTTS import VibeVoiceModelManager
+            
+            # Use remote TTS by default (can be made configurable later)
+            remote_manager = VibeVoiceTTSRemoteManager()
+            
+            # Clean up any existing TTS thread
+            if hasattr(self, 'retranslate_tts_thread') and self.retranslate_tts_thread and self.retranslate_tts_thread.isRunning():
+                self.retranslate_tts_thread.stop()
+                if not self.retranslate_tts_thread.wait(2000):
+                    self.retranslate_tts_thread.terminate()
+                    self.retranslate_tts_thread.wait(500)
+            
+            self.retranslate_tts_thread = remote_manager.create_tts_thread(
+                text=tts_text,
+                server_url="ws://10.110.31.157:3000/stream",  # Default remote URL
+                streaming=True
+            )
+            
+            self.retranslate_tts_thread.tts_completed.connect(self.on_retranslate_tts_completed)
+            self.retranslate_tts_thread.tts_error.connect(self.on_retranslate_tts_error)
+            self.retranslate_tts_thread.progress_update.connect(self.on_retranslate_tts_progress)
+            self.retranslate_tts_thread.audio_chunk_ready.connect(self.on_audio_chunk_ready)
+            self.retranslate_tts_thread.start()
+            
+        except Exception as e:
+            print(f"Failed to start retranslate TTS: {e}")
+            self.on_retranslate_tts_error(f"Failed to start TTS: {str(e)}")
+
+    def on_retranslate_tts_completed(self, audio_file_path):
+        """Handle retranslate TTS completion"""
+        print("Retranslate TTS audio generation completed")
+        self.set_audio_ready(audio_file_path)
+        self.retranslate_tts_thread = None
+
+    def on_retranslate_tts_progress(self, message):
+        """Handle retranslate TTS progress updates"""
+        print(f"Retranslate TTS Progress: {message}")
+        self.set_status(message)
+
+    def on_retranslate_tts_error(self, error_message):
+        """Handle retranslate TTS error"""
+        print(f"Retranslate TTS Error: {error_message}")
+        self.set_audio_error(error_message)
+
     def closeEvent(self, event):
         """Handle window close event"""
         # Emit destroyed signal before cleanup
@@ -1153,6 +1360,34 @@ class PopupWindow(QWidget):
                 self.dictionary_thread.terminate()
                 self.dictionary_thread.wait(500)
             self.dictionary_thread = None
+
+        # Stop and wait for retranslation thread to finish
+        if hasattr(self, 'retranslation_thread') and self.retranslation_thread and self.retranslation_thread.isRunning():
+            print("Waiting for retranslation thread to finish...")
+            try:
+                self.retranslation_thread.translation_chunk.disconnect()
+                self.retranslation_thread.translation_done.disconnect()
+            except:
+                pass
+            self.retranslation_thread.terminate()
+            self.retranslation_thread.wait(1000)
+            self.retranslation_thread = None
+
+        # Stop and wait for retranslate TTS thread to finish
+        if hasattr(self, 'retranslate_tts_thread') and self.retranslate_tts_thread and self.retranslate_tts_thread.isRunning():
+            print("Waiting for retranslate TTS thread to finish...")
+            try:
+                self.retranslate_tts_thread.tts_completed.disconnect()
+                self.retranslate_tts_thread.tts_error.disconnect()
+                self.retranslate_tts_thread.progress_update.disconnect()
+                self.retranslate_tts_thread.audio_chunk_ready.disconnect()
+            except:
+                pass
+            self.retranslate_tts_thread.stop()
+            if not self.retranslate_tts_thread.wait(2000):
+                self.retranslate_tts_thread.terminate()
+                self.retranslate_tts_thread.wait(500)
+            self.retranslate_tts_thread = None
 
         # Clean up temporary audio file
         if self.audio_file_path and os.path.exists(self.audio_file_path):
