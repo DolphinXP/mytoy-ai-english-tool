@@ -831,6 +831,15 @@ class PopupWindow(QWidget):
 
     def start_streaming_playback(self):
         """Initialize streaming audio playback"""
+        # Stop any existing streaming player first to prevent queue collision
+        if self.streaming_player is not None:
+            print("Stopping existing streaming player before starting new one")
+            self.streaming_player.stop()
+            self.streaming_player = None
+            # Small delay to ensure cleanup completes
+            import time
+            time.sleep(0.1)
+
         self.is_streaming = True
         self.streaming_chunks_received = 0
         self._streaming_done = False
@@ -1105,12 +1114,14 @@ class PopupWindow(QWidget):
             if self._streaming_done:
                 if self.streaming_player.audio_queue.empty():
                     last_chunk_time = self._last_stream_chunk_time or time.time()
-                    if time.time() - last_chunk_time >= 0.25:
+                    # Increased delay from 0.25s to 0.5s to ensure queue is truly empty
+                    if time.time() - last_chunk_time >= 0.5:
                         self._drain_idle_ticks += 1
                 else:
                     self._drain_idle_ticks = 0
 
-                if self._drain_idle_ticks >= 3:
+                # Reduced from 3 ticks to 2 ticks (total 1 second wait)
+                if self._drain_idle_ticks >= 2:
                     print("Streaming playback completed")
                     self.stop_streaming_playback(wait_for_completion=False)
                     self._streaming_done = False
@@ -1213,41 +1224,49 @@ class PopupWindow(QWidget):
 
     def retranslate_text(self):
         """Retranslate the current corrected text and regenerate TTS"""
+        # Debounce: prevent rapid re-clicks
+        import time
+        current_time = time.time()
+        if hasattr(self, '_last_retranslate_time') and (current_time - self._last_retranslate_time) < 1.0:
+            print("Retranslate debounced - too soon after last call")
+            return
+        self._last_retranslate_time = current_time
+
         # Get current corrected text (may be edited)
         current_corrected_text = self.corrected_text_display.toPlainText().strip()
-        
+
         if not current_corrected_text:
             return
-            
+
         # Update the corrected text property
         self.corrected_text = current_corrected_text
-        
+
         # Clear current translation and show loading
         self.translated_text_display.setPlainText("Translating...")
         self.set_status("Retranslating and regenerating audio...")
-        
+
         # Stop current audio playback
         if self.is_streaming:
             self.stop_streaming_playback()
         elif self.is_playing:
             self.stop_playback()
-            
+
         # Disable play button until new audio is ready
         self.play_stop_btn.setEnabled(False)
-        
+
         # Import and start translation thread
         from TranslationThread import TranslationThread
-        
+
         # Clean up any existing translation thread
         if hasattr(self, 'retranslation_thread') and self.retranslation_thread and self.retranslation_thread.isRunning():
             self.retranslation_thread.terminate()
             self.retranslation_thread.wait(1000)
-            
+
         self.retranslation_thread = TranslationThread(current_corrected_text, 'deepseek')
         self.retranslation_thread.translation_done.connect(self.on_retranslation_done)
         self.retranslation_thread.translation_chunk.connect(self.on_retranslation_chunk)
         self.retranslation_thread.start()
-        
+
         # Start TTS thread in parallel
         self._start_retranslate_tts(current_corrected_text)
 
@@ -1278,29 +1297,48 @@ class PopupWindow(QWidget):
             # For now, we'll use a simple approach by importing the managers directly
             from VibeVoiceTTSRemote import VibeVoiceTTSRemoteManager
             from VibeVoiceTTS import VibeVoiceModelManager
-            
+
             # Use remote TTS by default (can be made configurable later)
             remote_manager = VibeVoiceTTSRemoteManager()
-            
-            # Clean up any existing TTS thread
-            if hasattr(self, 'retranslate_tts_thread') and self.retranslate_tts_thread and self.retranslate_tts_thread.isRunning():
-                self.retranslate_tts_thread.stop()
-                if not self.retranslate_tts_thread.wait(2000):
-                    self.retranslate_tts_thread.terminate()
-                    self.retranslate_tts_thread.wait(500)
-            
+
+            # Clean up any existing TTS thread - MUST disconnect signals first
+            if hasattr(self, 'retranslate_tts_thread') and self.retranslate_tts_thread:
+                # Disconnect all signals first to prevent callbacks from old thread
+                try:
+                    self.retranslate_tts_thread.tts_completed.disconnect()
+                    self.retranslate_tts_thread.tts_error.disconnect()
+                    self.retranslate_tts_thread.progress_update.disconnect()
+                    self.retranslate_tts_thread.audio_chunk_ready.disconnect()
+                except Exception:
+                    pass
+
+                if self.retranslate_tts_thread.isRunning():
+                    print("Stopping previous TTS thread before starting new one...")
+                    self.retranslate_tts_thread.stop()
+                    # Wait longer for WebSocket to fully close
+                    if not self.retranslate_tts_thread.wait(5000):
+                        print("TTS thread did not stop in time, terminating...")
+                        self.retranslate_tts_thread.terminate()
+                        self.retranslate_tts_thread.wait(1000)
+                    print("Previous TTS thread stopped")
+
+                self.retranslate_tts_thread = None
+                # Small delay to ensure WebSocket resources are released
+                import time
+                time.sleep(0.2)
+
             self.retranslate_tts_thread = remote_manager.create_tts_thread(
                 text=tts_text,
                 server_url="ws://10.110.31.157:3000/stream",  # Default remote URL
                 streaming=True
             )
-            
+
             self.retranslate_tts_thread.tts_completed.connect(self.on_retranslate_tts_completed)
             self.retranslate_tts_thread.tts_error.connect(self.on_retranslate_tts_error)
             self.retranslate_tts_thread.progress_update.connect(self.on_retranslate_tts_progress)
             self.retranslate_tts_thread.audio_chunk_ready.connect(self.on_audio_chunk_ready)
             self.retranslate_tts_thread.start()
-            
+
         except Exception as e:
             print(f"Failed to start retranslate TTS: {e}")
             self.on_retranslate_tts_error(f"Failed to start TTS: {str(e)}")

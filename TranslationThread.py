@@ -36,6 +36,7 @@ class TranslationThread(QThread):
             del os.environ["SSL_CERT_FILE"]
 
     def run(self):
+        http_client = None
         try:
             # Create HTTP client with SSL verification disabled
             # This fixes SSL certificate verification errors in conda environments
@@ -112,3 +113,10 @@ class TranslationThread(QThread):
         except Exception as e:
             print(f"Translation error: {e}")
             self.translation_done.emit(self.text_to_translate)
+        finally:
+            # Properly close HTTP client to prevent resource leaks
+            if http_client is not None:
+                try:
+                    http_client.close()
+                except Exception as e:
+                    print(f"Error closing HTTP client: {e}")

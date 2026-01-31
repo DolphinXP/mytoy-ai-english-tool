@@ -344,10 +344,10 @@ class MainApp(QObject):
         if self.tts_thread is not None:
             if self.tts_thread.isRunning():
                 self.tts_thread.stop()  # Request graceful stop (closes WebSocket)
-                if not self.tts_thread.wait(2000):  # Wait up to 2 seconds
+                if not self.tts_thread.wait(5000):  # Wait up to 5 seconds (increased from 2)
                     print("TTS thread did not stop in time, terminating...")
                     self.tts_thread.terminate()
-                    self.tts_thread.wait(500)
+                    self.tts_thread.wait(1000)  # Wait up to 1 second for termination
             self.tts_thread = None
 
         # Start correction thread
