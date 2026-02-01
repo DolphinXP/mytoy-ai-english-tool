@@ -390,6 +390,8 @@ class MainApp(QObject):
             self.on_translation_done)
         self.translation_thread.translation_chunk.connect(
             self.on_translation_chunk)
+        self.translation_thread.translation_error.connect(
+            self.on_translation_error)
         self.translation_thread.start()
 
         # Start TTS thread in parallel (using corrected text)
@@ -410,6 +412,17 @@ class MainApp(QObject):
             # Only update status if TTS is still running
             if self.tts_thread is not None and self.tts_thread.isRunning():
                 self.popup_window.set_status("Translation done. Generating audio...")
+
+        self.translation_thread = None
+
+    def on_translation_error(self, error_message):
+        """Handle translation error - show error message instead of English source"""
+        print(f"Translation error: {error_message}")
+
+        if self.popup_window:
+            self.popup_window.translated_text_display.setPlainText(
+                f"Translation failed: {error_message}\n\nPlease try again.")
+            self.popup_window.set_status("Translation failed")
 
         self.translation_thread = None
 

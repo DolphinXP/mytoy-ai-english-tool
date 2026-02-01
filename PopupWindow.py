@@ -1265,6 +1265,7 @@ class PopupWindow(QWidget):
         self.retranslation_thread = TranslationThread(current_corrected_text, 'deepseek')
         self.retranslation_thread.translation_done.connect(self.on_retranslation_done)
         self.retranslation_thread.translation_chunk.connect(self.on_retranslation_chunk)
+        self.retranslation_thread.translation_error.connect(self.on_retranslation_error)
         self.retranslation_thread.start()
 
         # Start TTS thread in parallel
@@ -1282,11 +1283,19 @@ class PopupWindow(QWidget):
         print(f"Retranslation completed: {translated_text[:50]}...")
         self.translated_text = translated_text
         self.translated_text_display.setPlainText(translated_text)
-        
+
         # Only update status if TTS is still running
         if hasattr(self, 'retranslate_tts_thread') and self.retranslate_tts_thread and self.retranslate_tts_thread.isRunning():
             self.set_status("Retranslation done. Generating audio...")
-        
+
+        self.retranslation_thread = None
+
+    def on_retranslation_error(self, error_message):
+        """Handle retranslation error - show error message instead of English source"""
+        print(f"Retranslation error: {error_message}")
+        self.translated_text_display.setPlainText(
+            f"Translation failed: {error_message}\n\nPlease try again.")
+        self.set_status("Translation failed")
         self.retranslation_thread = None
 
     def _start_retranslate_tts(self, tts_text):
@@ -1405,6 +1414,7 @@ class PopupWindow(QWidget):
             try:
                 self.retranslation_thread.translation_chunk.disconnect()
                 self.retranslation_thread.translation_done.disconnect()
+                self.retranslation_thread.translation_error.disconnect()
             except:
                 pass
             self.retranslation_thread.terminate()

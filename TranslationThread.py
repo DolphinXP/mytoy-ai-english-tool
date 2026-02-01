@@ -13,6 +13,7 @@ warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 class TranslationThread(QThread):
     translation_done = Signal(str)
     translation_chunk = Signal(str)
+    translation_error = Signal(str)  # Signal for translation errors
 
     def __init__(self, text_to_translate, api_config=None):
         super().__init__()
@@ -103,16 +104,17 @@ class TranslationThread(QThread):
             self.translation_done.emit(translated_text)
 
         except httpx.ConnectError as e:
-            print(f"Translation connection error: {e}")
-            # If connection fails, use original text
-            self.translation_done.emit(self.text_to_translate)
+            error_msg = f"Translation connection error: {e}"
+            print(error_msg)
+            self.translation_error.emit(error_msg)
         except httpx.TimeoutException as e:
-            print(f"Translation timeout error: {e}")
-            # If timeout, use original text
-            self.translation_done.emit(self.text_to_translate)
+            error_msg = f"Translation timeout error: {e}"
+            print(error_msg)
+            self.translation_error.emit(error_msg)
         except Exception as e:
-            print(f"Translation error: {e}")
-            self.translation_done.emit(self.text_to_translate)
+            error_msg = f"Translation error: {e}"
+            print(error_msg)
+            self.translation_error.emit(error_msg)
         finally:
             # Properly close HTTP client to prevent resource leaks
             if http_client is not None:
