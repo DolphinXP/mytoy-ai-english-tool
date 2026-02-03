@@ -835,10 +835,13 @@ class PopupWindow(QWidget):
         if self.streaming_player is not None:
             print("Stopping existing streaming player before starting new one")
             self.streaming_player.stop()
+            # Wait for playback thread to fully terminate
+            if self.streaming_player.playback_thread and self.streaming_player.playback_thread.is_alive():
+                self.streaming_player.playback_thread.join(timeout=2.0)
             self.streaming_player = None
-            # Small delay to ensure cleanup completes
+            # Longer delay to ensure audio resources are fully released
             import time
-            time.sleep(0.1)
+            time.sleep(0.2)
 
         self.is_streaming = True
         self.streaming_chunks_received = 0
@@ -856,6 +859,13 @@ class PopupWindow(QWidget):
 
     def on_audio_chunk_ready(self, audio_bytes, sample_rate):
         """Handle incoming audio chunk for streaming playback"""
+        # Guard: Only process chunks if we're expecting them from the current thread
+        # This prevents orphaned chunks from old threads being processed
+        sender = self.sender()
+        if hasattr(self, 'retranslate_tts_thread') and sender != self.retranslate_tts_thread:
+            print(f"Ignoring audio chunk from old thread (sender: {sender})")
+            return
+
         if not self.is_streaming:
             self.start_streaming_playback()
 
@@ -899,8 +909,16 @@ class PopupWindow(QWidget):
                 f"Streaming ended at position: {self.streaming_position_at_end:.2f} seconds")
             print(
                 f"Total bytes played by streaming player: {self.streaming_player.total_bytes_played}")
+
+            # Stop the streaming player
             self.streaming_player.stop()
+
+            # Wait for playback thread to fully terminate
+            if self.streaming_player.playback_thread and self.streaming_player.playback_thread.is_alive():
+                self.streaming_player.playback_thread.join(timeout=2.0)
+
             self.streaming_player = None
+
         self.is_streaming = False
         self.is_playing = False
         self._set_play_button_state(False)
@@ -1245,9 +1263,16 @@ class PopupWindow(QWidget):
         self.translated_text_display.setPlainText("Translating...")
         self.set_status("Retranslating and regenerating audio...")
 
-        # Stop current audio playback
+        # Stop current audio playback and ensure streaming player is fully stopped
         if self.is_streaming:
+            print("Stopping streaming playback before retranslate...")
             self.stop_streaming_playback()
+            # Ensure streaming player is fully cleaned up
+            if self.streaming_player is not None:
+                self.streaming_player.stop()
+                self.streaming_player = None
+            # Small delay to ensure audio resources are released
+            time.sleep(0.1)
         elif self.is_playing:
             self.stop_playback()
 
@@ -1324,17 +1349,18 @@ class PopupWindow(QWidget):
                 if self.retranslate_tts_thread.isRunning():
                     print("Stopping previous TTS thread before starting new one...")
                     self.retranslate_tts_thread.stop()
-                    # Wait longer for WebSocket to fully close
-                    if not self.retranslate_tts_thread.wait(5000):
+                    # Wait longer for WebSocket to fully close - increased from 5s to 10s
+                    if not self.retranslate_tts_thread.wait(10000):
                         print("TTS thread did not stop in time, terminating...")
                         self.retranslate_tts_thread.terminate()
-                        self.retranslate_tts_thread.wait(1000)
+                        self.retranslate_tts_thread.wait(2000)
                     print("Previous TTS thread stopped")
 
                 self.retranslate_tts_thread = None
-                # Small delay to ensure WebSocket resources are released
+                # Longer delay to ensure WebSocket resources are fully released
+                # and server-side lock is released
                 import time
-                time.sleep(0.2)
+                time.sleep(0.5)
 
             self.retranslate_tts_thread = remote_manager.create_tts_thread(
                 text=tts_text,
@@ -1432,9 +1458,11 @@ class PopupWindow(QWidget):
             except:
                 pass
             self.retranslate_tts_thread.stop()
-            if not self.retranslate_tts_thread.wait(2000):
+            # Increased wait time from 2s to 5s for proper WebSocket cleanup
+            if not self.retranslate_tts_thread.wait(5000):
+                print("Retranslate TTS thread did not stop in time, terminating...")
                 self.retranslate_tts_thread.terminate()
-                self.retranslate_tts_thread.wait(500)
+                self.retranslate_tts_thread.wait(1000)
             self.retranslate_tts_thread = None
 
         # Clean up temporary audio file
