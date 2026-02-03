@@ -13,7 +13,6 @@ from GlobalShortcutHandler import GlobalShortcutHandler
 from ClipboardCapture import ClipboardCapture
 from TextCorrectionThread import TextCorrectionThread
 from TranslationThread import TranslationThread
-from VibeVoiceTTS import VibeVoiceModelManager
 from VibeVoiceTTSRemote import VibeVoiceTTSRemoteManager
 
 
@@ -218,6 +217,7 @@ class MainApp(QObject):
             )
 
             def load_model():
+                from VibeVoiceTTS import VibeVoiceModelManager
                 self.vibevoice_manager = VibeVoiceModelManager()
                 self.vibevoice_manager.get_tts_instance(
                     model_path="microsoft/VibeVoice-Realtime-0.5B",
@@ -324,10 +324,6 @@ class MainApp(QObject):
         self.popup_window.exit_app_requested.connect(self.exit_app)
         self.popup_window.popup_destroyed.connect(self.on_popup_destroyed)
         self.popup_window.show()
-
-        # Initialize model manager if not already done
-        if self.vibevoice_manager is None:
-            self.vibevoice_manager = VibeVoiceModelManager()
 
         # Stop and wait for any previous threads to finish
         # This prevents "QThread: Destroyed while thread is still running" errors
@@ -442,6 +438,7 @@ class MainApp(QObject):
                 # Use local TTS model
                 # Initialize local model manager if not already done
                 if self.vibevoice_manager is None:
+                    from VibeVoiceTTS import VibeVoiceModelManager
                     self.vibevoice_manager = VibeVoiceModelManager()
 
                 self.tts_thread = self.vibevoice_manager.create_tts_thread(

@@ -1,11 +1,4 @@
 import copy
-from vibevoice.modular.streamer import AudioStreamer
-from vibevoice.processor.vibevoice_streaming_processor import (
-    VibeVoiceStreamingProcessor,
-)
-from vibevoice.modular.modeling_vibevoice_streaming_inference import (
-    VibeVoiceStreamingForConditionalGenerationInference,
-)
 import sys
 import os
 import tempfile
@@ -16,13 +9,41 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import torch
 from PySide6.QtCore import Signal, QThread
 
-# Suppress tokenizer class mismatch warning - this is expected since
-# VibeVoiceTextTokenizerFast extends Qwen2TokenizerFast
-warnings.filterwarnings(
-    'ignore', message='.*tokenizer class you load from this checkpoint is not the same type.*')
+# Lazy imports for heavy vibevoice library - only loaded when needed
+AudioStreamer = None
+VibeVoiceStreamingProcessor = None
+VibeVoiceStreamingForConditionalGenerationInference = None
+torch = None
+
+
+def _load_vibevoice_dependencies():
+    """Lazily load the heavy vibevoice dependencies"""
+    global AudioStreamer, VibeVoiceStreamingProcessor, VibeVoiceStreamingForConditionalGenerationInference, torch
+
+    if AudioStreamer is not None:
+        return  # Already loaded
+
+    # Suppress tokenizer class mismatch warning - this is expected since
+    # VibeVoiceTextTokenizerFast extends Qwen2TokenizerFast
+    warnings.filterwarnings(
+        'ignore', message='.*tokenizer class you load from this checkpoint is not the same type.*')
+
+    import torch as _torch
+    torch = _torch
+
+    from vibevoice.modular.streamer import AudioStreamer as _AudioStreamer
+    from vibevoice.processor.vibevoice_streaming_processor import (
+        VibeVoiceStreamingProcessor as _VibeVoiceStreamingProcessor,
+    )
+    from vibevoice.modular.modeling_vibevoice_streaming_inference import (
+        VibeVoiceStreamingForConditionalGenerationInference as _VibeVoiceStreamingForConditionalGenerationInference,
+    )
+
+    AudioStreamer = _AudioStreamer
+    VibeVoiceStreamingProcessor = _VibeVoiceStreamingProcessor
+    VibeVoiceStreamingForConditionalGenerationInference = _VibeVoiceStreamingForConditionalGenerationInference
 
 # Add VibeVoice to path
 vibevoice_path = Path(__file__).parent / "VibeVoice"
@@ -67,6 +88,9 @@ class VibeVoiceTTS(QThread):
             return
 
         try:
+            self.progress_update.emit("Loading VibeVoice dependencies...")
+            _load_vibevoice_dependencies()
+
             self.progress_update.emit("Loading VibeVoice model...")
 
             # Load processor
