@@ -338,7 +338,7 @@ class PopupWindow(QWidget):
             self.play_stop_btn.setText("Stop")
             self._set_button_icon(self.play_stop_btn, "stop")
         else:
-            self.play_stop_btn.setText("Play English Audio")
+            self.play_stop_btn.setText("Play")
             self._set_button_icon(self.play_stop_btn, "play")
 
     def _style_menu(self, menu):
@@ -361,31 +361,6 @@ class PopupWindow(QWidget):
         # Main layout
         layout = QVBoxLayout()
 
-        # Top bar with Exit button
-        top_bar_layout = QHBoxLayout()
-        top_bar_layout.addStretch()
-
-        # Exit Program button (exits entire application)
-        self.exit_app_btn = QPushButton("Exit Program")
-        self.exit_app_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
-                border: none;
-                padding: 5px 15px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-            }
-        """)
-        self._set_button_icon(self.exit_app_btn, "power")
-        self.exit_app_btn.clicked.connect(self.request_exit_app)
-        top_bar_layout.addWidget(self.exit_app_btn)
-
-        layout.addLayout(top_bar_layout)
-
         # Title font
         title_font = QFont()
         title_font.setBold(True)
@@ -405,13 +380,13 @@ class PopupWindow(QWidget):
 
         # Corrected text section with controls
         corrected_header_layout = QHBoxLayout()
-        
+
         corrected_label = QLabel("AI Corrected Text:")
         corrected_label.setFont(title_font)
         corrected_header_layout.addWidget(corrected_label)
-        
+
         # Edit/Restore toggle button
-        self.edit_restore_btn = QPushButton("Edit")
+        self.edit_restore_btn = QPushButton("Edit Text")
         self.edit_restore_btn.setMaximumWidth(70)
         self.edit_restore_btn.setStyleSheet("""
             QPushButton {
@@ -428,7 +403,7 @@ class PopupWindow(QWidget):
         """)
         self.edit_restore_btn.clicked.connect(self.toggle_edit_restore)
         corrected_header_layout.addWidget(self.edit_restore_btn)
-        
+
         # Retranslate button
         self.retranslate_btn = QPushButton("Retranslate")
         self.retranslate_btn.setMaximumWidth(80)
@@ -447,7 +422,7 @@ class PopupWindow(QWidget):
         """)
         self.retranslate_btn.clicked.connect(self.retranslate_text)
         corrected_header_layout.addWidget(self.retranslate_btn)
-        
+
         corrected_header_layout.addStretch()
         layout.addLayout(corrected_header_layout)
 
@@ -464,7 +439,7 @@ class PopupWindow(QWidget):
         self.corrected_text_display.text_selected.connect(
             lambda: self.show_translate_menu_for_selection(self.corrected_text_display))
         layout.addWidget(self.corrected_text_display)
-        
+
         # Store original corrected text for restore functionality
         self.original_corrected_text = ""
         self.user_edited_text = ""  # Track user's edited text
@@ -537,7 +512,7 @@ class PopupWindow(QWidget):
         controls_layout = QHBoxLayout()
 
         # Play/Stop button
-        self.play_stop_btn = QPushButton("Play English Audio")
+        self.play_stop_btn = QPushButton("Play")
         self.play_stop_btn.setEnabled(False)
         self._set_play_button_state(False)
         self.play_stop_btn.clicked.connect(self.toggle_playback)
@@ -549,11 +524,24 @@ class PopupWindow(QWidget):
 
         controls_layout.addStretch()
 
-        # Close button
-        self.close_btn = QPushButton("Close")
-        self._set_button_icon(self.close_btn, "close")
-        self.close_btn.clicked.connect(self.close)
-        controls_layout.addWidget(self.close_btn)
+        # Exit Program button (exits entire application)
+        self.exit_app_btn = QPushButton("Exit Program")
+        self.exit_app_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                padding: 5px 15px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+        """)
+        self._set_button_icon(self.exit_app_btn, "power")
+        self.exit_app_btn.clicked.connect(self.request_exit_app)
+        controls_layout.addWidget(self.exit_app_btn)
 
         layout.addLayout(controls_layout)
 
@@ -659,7 +647,7 @@ class PopupWindow(QWidget):
             current_text = ""
             self.original_corrected_text = ""  # Reset when starting new correction
             self.user_edited_text = ""
-        
+
         new_text = current_text + chunk
         self.corrected_text_display.setPlainText(new_text)
         self.original_corrected_text = new_text  # Update original as we stream
@@ -1201,7 +1189,8 @@ class PopupWindow(QWidget):
         """Simple toggle: Edit -> make editable, Restore -> restore original and read-only"""
         if self.is_edit_mode:
             # Currently in edit mode - restore to original and make read-only
-            self.corrected_text_display.setPlainText(self.original_corrected_text)
+            self.corrected_text_display.setPlainText(
+                self.original_corrected_text)
             self.corrected_text = self.original_corrected_text
             self.corrected_text_display.setReadOnly(True)
             self.edit_restore_btn.setText("Edit")
@@ -1221,7 +1210,8 @@ class PopupWindow(QWidget):
             self.is_edit_mode = False
         else:
             # Currently in read-only mode - switch to edit mode with original text
-            self.corrected_text_display.setPlainText(self.original_corrected_text)
+            self.corrected_text_display.setPlainText(
+                self.original_corrected_text)
             self.corrected_text_display.setReadOnly(False)
             self.edit_restore_btn.setText("Restore")
             self.edit_restore_btn.setStyleSheet("""
@@ -1287,10 +1277,14 @@ class PopupWindow(QWidget):
             self.retranslation_thread.terminate()
             self.retranslation_thread.wait(1000)
 
-        self.retranslation_thread = TranslationThread(current_corrected_text, 'deepseek')
-        self.retranslation_thread.translation_done.connect(self.on_retranslation_done)
-        self.retranslation_thread.translation_chunk.connect(self.on_retranslation_chunk)
-        self.retranslation_thread.translation_error.connect(self.on_retranslation_error)
+        self.retranslation_thread = TranslationThread(
+            current_corrected_text, 'deepseek')
+        self.retranslation_thread.translation_done.connect(
+            self.on_retranslation_done)
+        self.retranslation_thread.translation_chunk.connect(
+            self.on_retranslation_chunk)
+        self.retranslation_thread.translation_error.connect(
+            self.on_retranslation_error)
         self.retranslation_thread.start()
 
         # Start TTS thread in parallel
@@ -1368,10 +1362,14 @@ class PopupWindow(QWidget):
                 streaming=True
             )
 
-            self.retranslate_tts_thread.tts_completed.connect(self.on_retranslate_tts_completed)
-            self.retranslate_tts_thread.tts_error.connect(self.on_retranslate_tts_error)
-            self.retranslate_tts_thread.progress_update.connect(self.on_retranslate_tts_progress)
-            self.retranslate_tts_thread.audio_chunk_ready.connect(self.on_audio_chunk_ready)
+            self.retranslate_tts_thread.tts_completed.connect(
+                self.on_retranslate_tts_completed)
+            self.retranslate_tts_thread.tts_error.connect(
+                self.on_retranslate_tts_error)
+            self.retranslate_tts_thread.progress_update.connect(
+                self.on_retranslate_tts_progress)
+            self.retranslate_tts_thread.audio_chunk_ready.connect(
+                self.on_audio_chunk_ready)
             self.retranslate_tts_thread.start()
 
         except Exception as e:
