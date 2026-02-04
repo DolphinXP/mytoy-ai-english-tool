@@ -385,6 +385,25 @@ class PopupWindow(QWidget):
         corrected_label.setFont(title_font)
         corrected_header_layout.addWidget(corrected_label)
 
+        # Copy button for corrected text
+        self.copy_corrected_btn = QPushButton("Copy")
+        self.copy_corrected_btn.setMaximumWidth(50)
+        self.copy_corrected_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 3px 8px;
+                border-radius: 3px;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+        """)
+        self.copy_corrected_btn.clicked.connect(self.copy_corrected_text)
+        corrected_header_layout.addWidget(self.copy_corrected_btn)
+
         # Edit/Restore toggle button
         self.edit_restore_btn = QPushButton("Edit Text")
         self.edit_restore_btn.setMaximumWidth(70)
@@ -445,10 +464,34 @@ class PopupWindow(QWidget):
         self.user_edited_text = ""  # Track user's edited text
         self.is_edit_mode = False
 
-        # Translated text section
+        # Translated text section with copy button
+        translated_header_layout = QHBoxLayout()
+
         translated_label = QLabel("Translated Text:")
         translated_label.setFont(title_font)
-        layout.addWidget(translated_label)
+        translated_header_layout.addWidget(translated_label)
+
+        # Copy button for translated text
+        self.copy_translated_btn = QPushButton("Copy")
+        self.copy_translated_btn.setMaximumWidth(50)
+        self.copy_translated_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 3px 8px;
+                border-radius: 3px;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+        """)
+        self.copy_translated_btn.clicked.connect(self.copy_translated_text)
+        translated_header_layout.addWidget(self.copy_translated_btn)
+
+        translated_header_layout.addStretch()
+        layout.addLayout(translated_header_layout)
 
         self.translated_text_display = TranslatableTextEdit()
         self.translated_text_display.setFont(QFont("Microsoft YaHei", 10))
@@ -588,6 +631,18 @@ class PopupWindow(QWidget):
         """Called when window is resized - save size"""
         super().resizeEvent(event)
         self.save_position()
+
+    def copy_corrected_text(self):
+        """Copy the corrected text to clipboard"""
+        text = self.corrected_text_display.toPlainText()
+        if text and text != "Correcting...":
+            QApplication.clipboard().setText(text)
+
+    def copy_translated_text(self):
+        """Copy the translated text to clipboard"""
+        text = self.translated_text_display.toPlainText()
+        if text and text != "Translating...":
+            QApplication.clipboard().setText(text)
 
     def show_translate_menu_for_selection(self, text_edit):
         """Show translate menu at cursor position for the selected word"""
