@@ -250,8 +250,8 @@ class VibeVoiceTTSRemote(QThread):
 
         print(f"[TTS Thread] Starting new TTS thread, stop_requested={self._stop_requested}")
 
-        max_retries = 10  # Maximum retry attempts
-        retry_delay = 1.0  # Initial delay between retries (seconds)
+        max_retries = 5  # Reduced from 10 - if server is busy for this long, something is wrong
+        retry_delay = 1.5  # Increased initial delay to give server more time to release
 
         for attempt in range(max_retries):
             if self._stop_requested:
@@ -267,10 +267,10 @@ class VibeVoiceTTSRemote(QThread):
                 url = self._build_url()
                 if attempt == 0:
                     print(f"[TTS Thread] Connecting to: {url[:100]}...")
-                    self.progress_update.emit(f"Connecting to remote TTS server...")
+                    self.progress_update.emit(f"Connecting to TTS server...")
                 else:
                     print(f"[TTS Thread] Retry {attempt}/{max_retries}: Connecting to: {url[:100]}...")
-                    self.progress_update.emit(f"Server busy, retrying ({attempt}/{max_retries})...")
+                    self.progress_update.emit(f"Waiting for server... ({attempt}/{max_retries})")
 
                 # Create WebSocket connection with explicit binary mode
                 # Use on_data callback to properly handle both text and binary frames
@@ -302,7 +302,7 @@ class VibeVoiceTTSRemote(QThread):
                     print(f"[TTS Thread] Backend busy, waiting {retry_delay}s before retry...")
                     import time
                     time.sleep(retry_delay)
-                    retry_delay = min(retry_delay * 1.5, 5.0)  # Exponential backoff, max 5s
+                    retry_delay = min(retry_delay * 1.3, 4.0)  # Slower backoff, max 4s
                     continue
 
                 # If we got audio data, we're done

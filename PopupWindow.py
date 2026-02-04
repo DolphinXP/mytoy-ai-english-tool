@@ -1343,18 +1343,19 @@ class PopupWindow(QWidget):
                 if self.retranslate_tts_thread.isRunning():
                     print("Stopping previous TTS thread before starting new one...")
                     self.retranslate_tts_thread.stop()
-                    # Wait longer for WebSocket to fully close - increased from 5s to 10s
-                    if not self.retranslate_tts_thread.wait(10000):
+                    # Wait for thread to stop - use shorter timeout since we'll wait more after
+                    if not self.retranslate_tts_thread.wait(3000):
                         print("TTS thread did not stop in time, terminating...")
                         self.retranslate_tts_thread.terminate()
-                        self.retranslate_tts_thread.wait(2000)
+                        self.retranslate_tts_thread.wait(1000)
                     print("Previous TTS thread stopped")
 
                 self.retranslate_tts_thread = None
-                # Longer delay to ensure WebSocket resources are fully released
-                # and server-side lock is released
-                import time
-                time.sleep(0.5)
+
+            # Wait for server to release the lock - this is the key fix
+            # The server needs time to clean up after the WebSocket closes
+            import time
+            time.sleep(1.0)
 
             self.retranslate_tts_thread = remote_manager.create_tts_thread(
                 text=tts_text,
