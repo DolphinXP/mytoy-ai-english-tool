@@ -78,6 +78,13 @@ class VibeVoiceTTS(QThread):
         # Control flags for stopping
         self._stop_requested = False
 
+        # Streaming buffer settings - buffer multiple chunks before emitting
+        # to avoid choppy playback due to irregular generation intervals
+        self._stream_buffer = []
+        self._stream_buffer_samples = 0
+        # Buffer at least 0.3 seconds of audio (7200 samples at 24kHz) before emitting
+        self._min_buffer_samples = int(self.sample_rate * 0.3)
+
     def stop(self):
         """Request to stop TTS generation"""
         self._stop_requested = True
@@ -229,6 +236,24 @@ class VibeVoiceTTS(QThread):
         audio_int16 = (audio_chunk * 32767).astype(np.int16)
         return audio_int16.tobytes()
 
+    def _flush_stream_buffer(self):
+        """Flush the streaming buffer by emitting all buffered audio"""
+        if self._stream_buffer:
+            combined = np.concatenate(self._stream_buffer)
+            audio_bytes = self._convert_chunk_to_bytes(combined)
+            self.audio_chunk_ready.emit(audio_bytes, self.sample_rate)
+            self._stream_buffer = []
+            self._stream_buffer_samples = 0
+
+    def _add_to_stream_buffer(self, audio_chunk):
+        """Add audio chunk to buffer and emit if buffer is full enough"""
+        self._stream_buffer.append(audio_chunk)
+        self._stream_buffer_samples += len(audio_chunk)
+
+        # Emit when we have enough buffered audio for smooth playback
+        if self._stream_buffer_samples >= self._min_buffer_samples:
+            self._flush_stream_buffer()
+
     def _generate_audio_streaming(self, text, voice_key=None):
         """Generate audio from text with streaming output"""
         # Get voice resources
@@ -271,6 +296,10 @@ class VibeVoiceTTS(QThread):
         thread.start()
 
         # Stream audio chunks
+        # Reset buffer for this generation
+        self._stream_buffer = []
+        self._stream_buffer_samples = 0
+
         try:
             stream = audio_streamer.get_stream(0)
             for audio_chunk in stream:
@@ -289,12 +318,14 @@ class VibeVoiceTTS(QThread):
                 audio_chunk = audio_chunk.astype(np.float32)
                 audio_chunks.append(audio_chunk)
 
-                # Emit chunk for streaming playback
+                # Buffer chunks for streaming playback to avoid choppy audio
                 if self.streaming:
-                    audio_bytes = self._convert_chunk_to_bytes(audio_chunk)
-                    self.audio_chunk_ready.emit(audio_bytes, self.sample_rate)
+                    self._add_to_stream_buffer(audio_chunk)
 
         finally:
+            # Flush any remaining buffered audio
+            if self.streaming:
+                self._flush_stream_buffer()
             stop_event.set()
             audio_streamer.end()
             thread.join()

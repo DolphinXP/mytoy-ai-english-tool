@@ -340,10 +340,12 @@ class MainApp(QObject):
         if self.tts_thread is not None:
             if self.tts_thread.isRunning():
                 self.tts_thread.stop()  # Request graceful stop (closes WebSocket)
-                if not self.tts_thread.wait(5000):  # Wait up to 5 seconds (increased from 2)
+                # Wait up to 5 seconds (increased from 2)
+                if not self.tts_thread.wait(5000):
                     print("TTS thread did not stop in time, terminating...")
                     self.tts_thread.terminate()
-                    self.tts_thread.wait(1000)  # Wait up to 1 second for termination
+                    # Wait up to 1 second for termination
+                    self.tts_thread.wait(1000)
             self.tts_thread = None
 
         # Start correction thread
@@ -376,11 +378,11 @@ class MainApp(QObject):
         # Update popup with corrected text
         if self.popup_window:
             self.popup_window.update_corrected_text(corrected_text)
-            self.popup_window.set_status("Translating and generating audio...")
+            self.popup_window.set_status("Generating audio...")
 
         self.correction_thread = None
 
-        # Start translation thread
+        # Start translation thread FIRST - this should not be blocked by TTS model loading
         self.translation_thread = TranslationThread(corrected_text, 'deepseek')
         self.translation_thread.translation_done.connect(
             self.on_translation_done)
@@ -390,8 +392,12 @@ class MainApp(QObject):
             self.on_translation_error)
         self.translation_thread.start()
 
-        # Start TTS thread in parallel (using corrected text)
-        self._start_tts(corrected_text)
+        # Start TTS in a separate thread to avoid blocking translation
+        # This is important for local TTS mode where model loading can take time
+        import threading
+        tts_starter = threading.Thread(
+            target=self._start_tts, args=(corrected_text,), daemon=True)
+        tts_starter.start()
 
     def on_translation_chunk(self, chunk):
         """Handle streaming translation chunk"""
@@ -407,7 +413,8 @@ class MainApp(QObject):
             self.popup_window.update_translated_text(translated_text)
             # Only update status if TTS is still running
             if self.tts_thread is not None and self.tts_thread.isRunning():
-                self.popup_window.set_status("Translation done. Generating audio...")
+                self.popup_window.set_status(
+                    "Translation done. Generating audio...")
 
         self.translation_thread = None
 
