@@ -48,20 +48,20 @@ class Theme:
         GRAY_800 = "#1f2937"
         GRAY_900 = "#111827"
 
-        # Background colors
-        BG_PRIMARY = WHITE
-        BG_SECONDARY = GRAY_50
-        BG_TERTIARY = GRAY_100
+        # Background colors (Dark theme friendly)
+        BG_PRIMARY = GRAY_800
+        BG_SECONDARY = GRAY_700
+        BG_TERTIARY = GRAY_600
 
-        # Text colors
-        TEXT_PRIMARY = GRAY_900
-        TEXT_SECONDARY = GRAY_600
-        TEXT_TERTIARY = GRAY_500
-        TEXT_INVERSE = WHITE
+        # Text colors (High contrast for dark backgrounds)
+        TEXT_PRIMARY = WHITE
+        TEXT_SECONDARY = GRAY_300
+        TEXT_TERTIARY = GRAY_400
+        TEXT_INVERSE = GRAY_900
 
-        # Border colors
-        BORDER_LIGHT = GRAY_200
-        BORDER_MEDIUM = GRAY_300
+        # Border colors (Dark theme friendly)
+        BORDER_LIGHT = GRAY_600
+        BORDER_MEDIUM = GRAY_500
         BORDER_DARK = GRAY_400
 
     # Typography
@@ -132,7 +132,7 @@ class Theme:
         return f"""
             QPushButton {{
                 background-color: {bg_color};
-                color: {Theme.Colors.TEXT_INVERSE};
+                color: {Theme.Colors.WHITE};
                 border: none;
                 padding: {Theme.Spacing.SM}px {Theme.Spacing.MD}px;
                 border-radius: {Theme.Radius.SM}px;
@@ -147,8 +147,8 @@ class Theme:
                 padding-top: {Theme.Spacing.SM + 1}px;
             }}
             QPushButton:disabled {{
-                background-color: {Theme.Colors.GRAY_300};
-                color: {Theme.Colors.GRAY_500};
+                background-color: {Theme.Colors.GRAY_600};
+                color: {Theme.Colors.GRAY_400};
             }}
         """
 
@@ -164,7 +164,8 @@ class Theme:
                 border-radius: {Theme.Radius.MD}px;
                 padding: {Theme.Spacing.SM}px;
                 font-size: {Theme.Fonts.SIZE_NORMAL}px;
-                selection-background-color: {Theme.Colors.PRIMARY_LIGHT};
+                selection-background-color: {Theme.Colors.PRIMARY};
+                selection-color: {Theme.Colors.WHITE};
             }}
             QTextEdit:focus, QTextBrowser:focus {{
                 border: 1px solid {Theme.Colors.PRIMARY};
@@ -205,6 +206,7 @@ class Theme:
                 border: 1px solid {Theme.Colors.BORDER_LIGHT};
                 border-radius: {Theme.Radius.SM}px;
                 background-color: {Theme.Colors.BG_SECONDARY};
+                color: {Theme.Colors.TEXT_PRIMARY};
                 text-align: center;
                 height: 20px;
             }}
@@ -221,17 +223,19 @@ class Theme:
         return f"""
             QMenu {{
                 background-color: {Theme.Colors.BG_PRIMARY};
+                color: {Theme.Colors.TEXT_PRIMARY};
                 border: 1px solid {Theme.Colors.BORDER_LIGHT};
                 border-radius: {Theme.Radius.MD}px;
                 padding: {Theme.Spacing.XS}px;
             }}
             QMenu::item {{
+                color: {Theme.Colors.TEXT_PRIMARY};
                 padding: {Theme.Spacing.SM}px {Theme.Spacing.MD}px;
                 border-radius: {Theme.Radius.SM}px;
             }}
             QMenu::item:selected {{
-                background-color: {Theme.Colors.PRIMARY_LIGHT};
-                color: {Theme.Colors.TEXT_PRIMARY};
+                background-color: {Theme.Colors.PRIMARY};
+                color: {Theme.Colors.WHITE};
             }}
             QMenu::separator {{
                 height: 1px;
