@@ -10,9 +10,11 @@ from PySide6.QtGui import QIcon, QPixmap
 from core.thread_manager import ThreadManager
 from core.text_processor import TextProcessor
 from services.clipboard.clipboard_service import ClipboardService
+from services.context_menu.context_menu_service import ContextMenuService
 from utils.shortcuts import GlobalShortcutHandler
 from utils.helpers import clean_text
 from ui.dialogs.tts_server_dialog import TTSServerSelectionDialog
+from ui.widgets.floating_context_menu import FloatingContextMenu
 
 
 class MainApp(QObject):
@@ -26,6 +28,10 @@ class MainApp(QObject):
         # Services
         self.clipboard_service = ClipboardService()
         self.thread_manager = ThreadManager()
+
+        # Universal context menu service
+        self.context_menu_service = ContextMenuService()
+        self.floating_menu = None
 
         # Current popup window
         self.popup_window = None
@@ -54,6 +60,9 @@ class MainApp(QObject):
         self.shortcut_handler = GlobalShortcutHandler()
         self.shortcut_handler.double_ctrl_c_triggered.connect(
             self.on_double_ctrl_c)
+
+        # Setup context menu service
+        self._setup_context_menu()
 
         print("=== AI-TTS: Double Ctrl+C Text Processor ===")
         print("How to use:")
@@ -93,6 +102,14 @@ class MainApp(QObject):
 
         # Create context menu
         tray_menu = QMenu()
+
+        # Universal Context Menu toggle (checkable)
+        self.context_menu_action = tray_menu.addAction("Universal Context Menu")
+        self.context_menu_action.setCheckable(True)
+        self.context_menu_action.setChecked(True)  # Enabled by default
+        self.context_menu_action.triggered.connect(self.toggle_context_menu)
+
+        tray_menu.addSeparator()
 
         # Test clipboard
         test_action = tray_menu.addAction("Test Double Ctrl+C")
@@ -137,6 +154,50 @@ class MainApp(QObject):
     def change_tts_server(self):
         """Change TTS server from tray menu."""
         self.show_tts_server_selection()
+
+    def _setup_context_menu(self):
+        """Setup the universal context menu service."""
+        self.context_menu_service.menu_requested.connect(self._on_context_menu_requested)
+        # Enable by default
+        self.context_menu_service.set_enabled(True)
+        print("Universal Context Menu: enabled (middle-click after selecting text)")
+
+    def toggle_context_menu(self, checked: bool):
+        """Toggle the universal context menu feature."""
+        self.context_menu_service.set_enabled(checked)
+        status = "enabled" if checked else "disabled"
+        self.tray_icon.showMessage(
+            "AI-TTS",
+            f"Universal Context Menu {status}\nMiddle-click after selecting text to show menu.",
+            QSystemTrayIcon.Information,
+            3000
+        )
+        print(f"Universal Context Menu: {status}")
+
+    def _on_context_menu_requested(self, x: int, y: int):
+        """Handle context menu request from middle-click."""
+        # Close existing floating menu if any
+        if self.floating_menu is not None:
+            self.floating_menu.close()
+            self.floating_menu = None
+
+        # Create new floating menu
+        self.floating_menu = FloatingContextMenu()
+        self.floating_menu.process_text_requested.connect(self._on_floating_menu_process)
+        self.floating_menu.menu_closed.connect(self._on_floating_menu_closed)
+
+        # Show at cursor position
+        self.floating_menu.show_at(x, y)
+
+    def _on_floating_menu_process(self, text: str):
+        """Handle process request from floating menu."""
+        if text and text.strip():
+            text = clean_text(text)
+            self.process_clipboard_text(text)
+
+    def _on_floating_menu_closed(self):
+        """Handle floating menu close."""
+        self.floating_menu = None
 
     def preload_model(self):
         """Preload the VibeVoice model in background."""
@@ -311,11 +372,16 @@ class MainApp(QObject):
         if self.popup_window is not None:
             self.popup_window.close()
 
+        # Close floating menu
+        if self.floating_menu is not None:
+            self.floating_menu.close()
+
         # Stop all threads
         self.thread_manager.stop_all_threads()
 
         # Cleanup
         self.shortcut_handler.stop()
+        self.context_menu_service.stop()
         self.tray_icon.hide()
         self.app.quit()
 
