@@ -159,15 +159,7 @@ class ExplainDialog(QDialog):
         self.response_display.setFont(QFont(Theme.Fonts.FAMILY_SECONDARY, Theme.Fonts.SIZE_LARGE))
         self.response_display.setPlainText("Ask a question to get AI explanation...")
         self.response_display.setOpenExternalLinks(True)
-        self.response_display.setStyleSheet(f"""
-            QTextBrowser {{
-                background-color: {Theme.Colors.BG_SECONDARY};
-                color: {Theme.Colors.TEXT_PRIMARY};
-                border: 1px solid {Theme.Colors.BORDER_LIGHT};
-                border-radius: {Theme.Radius.MD}px;
-                padding: {Theme.Spacing.SM}px;
-            }}
-        """)
+        self.response_display.setStyleSheet(Theme.text_edit_style())
         response_layout.addWidget(self.response_display)
 
         splitter.addWidget(response_widget)

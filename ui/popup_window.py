@@ -190,15 +190,7 @@ class PopupWindow(AudioMixin, DictionaryMixin, RetranslateMixin, QWidget):
         self.dictionary_display.setPlainText(
             "Select text in Corrected/Translated sections, then right-click 'Translate' to look up here.")
         self.dictionary_display.setOpenExternalLinks(True)
-        self.dictionary_display.setStyleSheet(f"""
-            QTextBrowser {{
-                background-color: {Theme.Colors.BG_SECONDARY};
-                color: {Theme.Colors.TEXT_PRIMARY};
-                border: 1px solid {Theme.Colors.BORDER_LIGHT};
-                border-radius: {Theme.Radius.MD}px;
-                padding: {Theme.Spacing.SM}px;
-            }}
-        """)
+        self.dictionary_display.setStyleSheet(Theme.text_edit_style())
         self.dictionary_display.setContextMenuPolicy(_Qt.CustomContextMenu)
         self.dictionary_display.customContextMenuRequested.connect(
             lambda pos: self._show_context_menu(self.dictionary_display, pos))
