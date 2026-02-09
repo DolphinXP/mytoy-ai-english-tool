@@ -22,7 +22,8 @@ class RemoteTTSThread(QThread):
     tts_completed = Signal(str)  # Signal to emit audio file path
     tts_error = Signal(str)  # Signal for error messages
     progress_update = Signal(str)  # Signal for progress updates
-    audio_chunk_ready = Signal(bytes, int)  # Signal for streaming: (audio_bytes, sample_rate)
+    # Signal for streaming: (audio_bytes, sample_rate)
+    audio_chunk_ready = Signal(bytes, int)
 
     def __init__(self, text, server_url="ws://10.110.31.157:3000/stream", streaming=False, voice_preset="en-Emma_woman"):
         super().__init__()
@@ -71,12 +72,14 @@ class RemoteTTSThread(QThread):
             if len(audio_array) > 0:
                 max_val = np.max(np.abs(audio_array))
                 if max_val > 32767:
-                    print(f"Warning: Audio data exceeds int16 range: {max_val}")
+                    print(
+                        f"Warning: Audio data exceeds int16 range: {max_val}")
 
             return audio_array.tobytes()
 
         except Exception as e:
-            print(f"Error parsing audio chunk: {e}, data length: {len(data) if data else 0}")
+            print(
+                f"Error parsing audio chunk: {e}, data length: {len(data) if data else 0}")
             return b''
 
     def _on_data(self, ws, data, data_type, continue_flag):
@@ -91,7 +94,7 @@ class RemoteTTSThread(QThread):
                     data = data.decode('utf-8')
                 log_data = json.loads(data)
                 event_type = log_data.get("event", "unknown")
-                print(f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
+                # print(f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
 
                 if event_type == "backend_busy":
                     self._backend_busy = True
@@ -102,7 +105,8 @@ class RemoteTTSThread(QThread):
         elif data_type == 2:  # Binary message (audio data)
             if isinstance(data, str):
                 data = data.encode('latin-1')
-            print(f"[WebSocket] Received binary audio chunk: {len(data)} bytes")
+            # print(
+            #     f"[WebSocket] Received binary audio chunk: {len(data)} bytes")
 
             audio_bytes = self._parse_audio_chunk(data)
 
@@ -123,7 +127,7 @@ class RemoteTTSThread(QThread):
                 import json
                 log_data = json.loads(message)
                 event_type = log_data.get("event", "unknown")
-                print(f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
+                # print(f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
             except:
                 print(f"[WebSocket] Received text message: {message[:100]}")
             return
@@ -163,9 +167,11 @@ class RemoteTTSThread(QThread):
         )
 
         if is_normal_close and len(self.all_audio_data) > 0:
-            print(f"[WebSocket] Streaming completed normally (code: {close_status_code})")
+            print(
+                f"[WebSocket] Streaming completed normally (code: {close_status_code})")
         elif close_status_code not in normal_close_codes:
-            print(f"[WebSocket] Connection closed with code: {close_status_code} - {close_msg}")
+            print(
+                f"[WebSocket] Connection closed with code: {close_status_code} - {close_msg}")
 
         if self.all_audio_data:
             audio_file_path = self._save_audio(bytes(self.all_audio_data))
@@ -179,7 +185,8 @@ class RemoteTTSThread(QThread):
     def _on_open(self, ws):
         """Handle WebSocket connection open."""
         self._connection_completed = True
-        self.progress_update.emit(f"Connected to remote TTS server: {self.server_url}")
+        self.progress_update.emit(
+            f"Connected to remote TTS server: {self.server_url}")
 
     def _save_audio(self, audio_bytes):
         """Save audio to temporary WAV file."""
@@ -201,7 +208,8 @@ class RemoteTTSThread(QThread):
             self.tts_error.emit(error_msg)
             return
 
-        print(f"[TTS Thread] Starting new TTS thread, stop_requested={self._stop_requested}")
+        print(
+            f"[TTS Thread] Starting new TTS thread, stop_requested={self._stop_requested}")
 
         max_retries = 5
         retry_delay = 1.5
@@ -222,8 +230,10 @@ class RemoteTTSThread(QThread):
                     print(f"[TTS Thread] Connecting to: {url[:100]}...")
                     self.progress_update.emit(f"Connecting to TTS server...")
                 else:
-                    print(f"[TTS Thread] Retry {attempt}/{max_retries}: Connecting to: {url[:100]}...")
-                    self.progress_update.emit(f"Waiting for server... ({attempt}/{max_retries})")
+                    print(
+                        f"[TTS Thread] Retry {attempt}/{max_retries}: Connecting to: {url[:100]}...")
+                    self.progress_update.emit(
+                        f"Waiting for server... ({attempt}/{max_retries})")
 
                 self._ws = websocket.WebSocketApp(
                     url,
@@ -245,14 +255,16 @@ class RemoteTTSThread(QThread):
                 self._ws = None
 
                 if self._backend_busy:
-                    print(f"[TTS Thread] Backend busy, waiting {retry_delay}s before retry...")
+                    print(
+                        f"[TTS Thread] Backend busy, waiting {retry_delay}s before retry...")
                     import time
                     time.sleep(retry_delay)
                     retry_delay = min(retry_delay * 1.3, 4.0)
                     continue
 
                 if len(self.all_audio_data) > 0:
-                    print(f"[TTS Thread] Successfully received {len(self.all_audio_data)} bytes of audio")
+                    print(
+                        f"[TTS Thread] Successfully received {len(self.all_audio_data)} bytes of audio")
                     return
 
                 print("[TTS Thread] No audio received and no backend_busy flag")

@@ -52,7 +52,8 @@ class VibeVoiceTTSRemote(QThread):
             "voice": self.voice_preset,
             "cfg": "1.5",  # Default CFG scale
             "steps": "5",  # Default inference steps
-            "_t": str(int(time.time() * 1000)),  # Unique timestamp to prevent caching
+            # Unique timestamp to prevent caching
+            "_t": str(int(time.time() * 1000)),
         }
         return f"{self.server_url}?{urlencode(params)}"
 
@@ -107,7 +108,7 @@ class VibeVoiceTTSRemote(QThread):
                     data = data.decode('utf-8')
                 log_data = json.loads(data)
                 event_type = log_data.get("event", "unknown")
-                print(f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
+                # print(f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
 
                 # Check if backend is busy - set flag for retry
                 if event_type == "backend_busy":
@@ -120,7 +121,8 @@ class VibeVoiceTTSRemote(QThread):
             # Binary message (audio data)
             if isinstance(data, str):
                 data = data.encode('latin-1')
-            print(f"[WebSocket] Received binary audio chunk: {len(data)} bytes")
+            # print(
+            #     f"[WebSocket] Received binary audio chunk: {len(data)} bytes")
 
             # Parse and emit audio chunk
             audio_bytes = self._parse_audio_chunk(data)
@@ -149,7 +151,7 @@ class VibeVoiceTTSRemote(QThread):
                 log_data = json.loads(message)
                 event_type = log_data.get("event", "unknown")
                 print(
-                    f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
+                    # f"[WebSocket Log] {event_type}: {log_data.get('data', {})}")
             except:
                 print(f"[WebSocket] Received text message: {message[:100]}")
             # Don't process text messages as audio
@@ -159,7 +161,7 @@ class VibeVoiceTTSRemote(QThread):
         # print(f"[WebSocket] Received binary audio chunk: {len(message)} bytes")
 
         # Parse and emit audio chunk
-        audio_bytes = self._parse_audio_chunk(message)
+        audio_bytes=self._parse_audio_chunk(message)
 
         if audio_bytes:
             self.all_audio_data.extend(audio_bytes)
@@ -174,7 +176,7 @@ class VibeVoiceTTSRemote(QThread):
 
     def _on_error(self, ws, error):
         """Handle WebSocket errors - only emit for real errors, not normal closure"""
-        error_str = str(error)
+        error_str=str(error)
 
         # Ignore normal closure errors (opcode 8 is normal close)
         # The websocket-client library reports normal closure as an error
@@ -184,7 +186,7 @@ class VibeVoiceTTSRemote(QThread):
             return
 
         # Only emit for actual errors
-        error_msg = f"WebSocket error: {error_str}"
+        error_msg=f"WebSocket error: {error_str}"
         print(f"[WebSocket Error] {error_msg}")
         self.tts_error.emit(error_msg)
 
@@ -197,9 +199,9 @@ class VibeVoiceTTSRemote(QThread):
 
         # Normal close codes: 1000 (normal), 1005 (no status)
         # The server may close with various codes after streaming completes
-        normal_close_codes = [1000, 1005, 1006, None]
+        normal_close_codes=[1000, 1005, 1006, None]
 
-        is_normal_close = (
+        is_normal_close=(
             close_status_code in normal_close_codes or
             (close_status_code is None and len(self.all_audio_data) > 0)
         )
@@ -213,18 +215,18 @@ class VibeVoiceTTSRemote(QThread):
 
         # Save audio to file if we received any data
         if self.all_audio_data:
-            audio_file_path = self._save_audio(bytes(self.all_audio_data))
+            audio_file_path=self._save_audio(bytes(self.all_audio_data))
             self.tts_completed.emit(audio_file_path)
         else:
             # Emit error if no audio data was received and it wasn't a normal close
             if not is_normal_close:
-                error_msg = f"Connection closed without audio data (code: {close_status_code})"
+                error_msg=f"Connection closed without audio data (code: {close_status_code})"
                 print(f"[WebSocket] {error_msg}")
                 self.tts_error.emit(error_msg)
 
     def _on_open(self, ws):
         """Handle WebSocket connection open"""
-        self._connection_completed = True
+        self._connection_completed=True
         self.progress_update.emit(
             f"Connected to remote TTS server: {self.server_url}")
 
@@ -244,14 +246,15 @@ class VibeVoiceTTSRemote(QThread):
     def run(self):
         """Run TTS generation via remote WebSocket server with retry on backend_busy"""
         if not HAS_WEBSOCKET:
-            error_msg = "websocket-client library not installed. Please install it with: pip install websocket-client"
+            error_msg="websocket-client library not installed. Please install it with: pip install websocket-client"
             self.tts_error.emit(error_msg)
             return
 
-        print(f"[TTS Thread] Starting new TTS thread, stop_requested={self._stop_requested}")
+        print(
+            f"[TTS Thread] Starting new TTS thread, stop_requested={self._stop_requested}")
 
-        max_retries = 5  # Reduced from 10 - if server is busy for this long, something is wrong
-        retry_delay = 1.5  # Increased initial delay to give server more time to release
+        max_retries=5  # Reduced from 10 - if server is busy for this long, something is wrong
+        retry_delay=1.5  # Increased initial delay to give server more time to release
 
         for attempt in range(max_retries):
             if self._stop_requested:
@@ -259,22 +262,24 @@ class VibeVoiceTTSRemote(QThread):
                 return
 
             # Reset state for each attempt
-            self._backend_busy = False
-            self.all_audio_data = bytearray()
-            self.audio_chunks = []
+            self._backend_busy=False
+            self.all_audio_data=bytearray()
+            self.audio_chunks=[]
 
             try:
-                url = self._build_url()
+                url=self._build_url()
                 if attempt == 0:
                     print(f"[TTS Thread] Connecting to: {url[:100]}...")
                     self.progress_update.emit(f"Connecting to TTS server...")
                 else:
-                    print(f"[TTS Thread] Retry {attempt}/{max_retries}: Connecting to: {url[:100]}...")
-                    self.progress_update.emit(f"Waiting for server... ({attempt}/{max_retries})")
+                    print(
+                        f"[TTS Thread] Retry {attempt}/{max_retries}: Connecting to: {url[:100]}...")
+                    self.progress_update.emit(
+                        f"Waiting for server... ({attempt}/{max_retries})")
 
                 # Create WebSocket connection with explicit binary mode
                 # Use on_data callback to properly handle both text and binary frames
-                self._ws = websocket.WebSocketApp(
+                self._ws=websocket.WebSocketApp(
                     url,
                     on_open=self._on_open,
                     on_data=self._on_data,
@@ -295,19 +300,22 @@ class VibeVoiceTTSRemote(QThread):
 
                 print("[TTS Thread] run_forever exited")
                 # Clear WebSocket reference after it's done
-                self._ws = None
+                self._ws=None
 
                 # Check if backend was busy - retry if so
                 if self._backend_busy:
-                    print(f"[TTS Thread] Backend busy, waiting {retry_delay}s before retry...")
+                    print(
+                        f"[TTS Thread] Backend busy, waiting {retry_delay}s before retry...")
                     import time
                     time.sleep(retry_delay)
-                    retry_delay = min(retry_delay * 1.3, 4.0)  # Slower backoff, max 4s
+                    # Slower backoff, max 4s
+                    retry_delay=min(retry_delay * 1.3, 4.0)
                     continue
 
                 # If we got audio data, we're done
                 if len(self.all_audio_data) > 0:
-                    print(f"[TTS Thread] Successfully received {len(self.all_audio_data)} bytes of audio")
+                    print(
+                        f"[TTS Thread] Successfully received {len(self.all_audio_data)} bytes of audio")
                     return
 
                 # If no audio and no backend_busy, something else went wrong
@@ -315,26 +323,26 @@ class VibeVoiceTTSRemote(QThread):
                 return
 
             except Exception as e:
-                error_msg = f"Remote TTS error: {str(e)}"
+                error_msg=f"Remote TTS error: {str(e)}"
                 print(error_msg)
                 self.tts_error.emit(error_msg)
                 return
             finally:
                 # Ensure WebSocket reference is cleared
-                self._ws = None
+                self._ws=None
 
         # Exhausted all retries
-        error_msg = f"Server busy after {max_retries} retries. Please try again later."
+        error_msg=f"Server busy after {max_retries} retries. Please try again later."
         print(f"[TTS Thread] {error_msg}")
         self.tts_error.emit(error_msg)
         print("[TTS Thread] Thread finished")
 
     def stop(self):
         """Request to stop TTS generation and close WebSocket connection"""
-        self._stop_requested = True
+        self._stop_requested=True
 
         # Close the WebSocket connection if it's active
-        ws = self._ws  # Local reference to avoid race condition
+        ws=self._ws  # Local reference to avoid race condition
         if ws is not None:
             try:
                 # First try graceful close
@@ -350,33 +358,33 @@ class VibeVoiceTTSRemote(QThread):
                 print(f"Error force closing WebSocket socket: {e}")
 
             # Clear reference immediately
-            self._ws = None
+            self._ws=None
 
 
 class VibeVoiceTTSRemoteManager:
     """Manager for remote VibeVoice TTS - follows the same pattern as VibeVoiceModelManager"""
 
-    _instance = None
-    _lock = threading.Lock()
+    _instance=None
+    _lock=threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
+                    cls._instance=super().__new__(cls)
+                    cls._instance._initialized=False
         return cls._instance
 
     def __init__(self):
         if self._initialized:
             return
-        self._initialized = True
-        self._server_url = "ws://10.110.31.157:3000/stream"  # Default server
-        self._voice_preset = "en-Emma_woman"  # Default voice preset
+        self._initialized=True
+        self._server_url="ws://10.110.31.157:3000/stream"  # Default server
+        self._voice_preset="en-Emma_woman"  # Default voice preset
 
     def set_server_url(self, url):
         """Set the remote server URL"""
-        self._server_url = url
+        self._server_url=url
 
     def get_server_url(self):
         """Get the current server URL"""
@@ -384,7 +392,7 @@ class VibeVoiceTTSRemoteManager:
 
     def set_voice_preset(self, voice):
         """Set the voice preset to use"""
-        self._voice_preset = voice
+        self._voice_preset=voice
 
     def get_voice_preset(self):
         """Get the current voice preset"""
@@ -393,9 +401,9 @@ class VibeVoiceTTSRemoteManager:
     def create_tts_thread(self, text, server_url=None, streaming=False, voice_preset=None):
         """Create a new TTS thread for remote server"""
         if server_url is None:
-            server_url = self._server_url
+            server_url=self._server_url
         if voice_preset is None:
-            voice_preset = self._voice_preset
+            voice_preset=self._voice_preset
 
-        thread = VibeVoiceTTSRemote(text, server_url, streaming, voice_preset)
+        thread=VibeVoiceTTSRemote(text, server_url, streaming, voice_preset)
         return thread
