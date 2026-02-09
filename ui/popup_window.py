@@ -28,6 +28,7 @@ from ui.widgets.text_section import TextSection
 from ui.widgets.audio_controls import AudioControls
 from services.audio.streaming_player import StreamingAudioPlayer
 from services.audio.file_player import FileAudioPlayer
+from ui.dialogs.explain_dialog import ExplainDialog
 
 
 class PopupWindow(QWidget):
@@ -191,6 +192,10 @@ class PopupWindow(QWidget):
         self.copy_translated_btn = self._small_btn("Copy")
         self.copy_translated_btn.clicked.connect(lambda: self._copy_text(self.translated_text_display))
         hdr.addWidget(self.copy_translated_btn)
+
+        self.explain_btn = self._small_btn("Explain", "primary", 70)
+        self.explain_btn.clicked.connect(self._open_explain_dialog)
+        hdr.addWidget(self.explain_btn)
 
         hdr.addStretch()
         layout.addLayout(hdr)
@@ -508,6 +513,13 @@ class PopupWindow(QWidget):
         translate_action.setEnabled(cursor.hasSelection())
         menu.addAction(translate_action)
 
+        explain_action = QAction("Explain with AI", self)
+        icon = self.icon_mgr.make_menu_icon("search")
+        if not icon.isNull():
+            explain_action.setIcon(icon)
+        explain_action.triggered.connect(lambda: self._open_explain_dialog(text_edit))
+        menu.addAction(explain_action)
+
         menu.exec(text_edit.mapToGlobal(pos))
 
     def _show_translate_menu(self, text_edit):
@@ -527,6 +539,14 @@ class PopupWindow(QWidget):
             action.setIcon(icon)
         action.triggered.connect(lambda: self._translate_selected(text_edit))
         menu.addAction(action)
+
+        explain_action = QAction("Explain with AI", self)
+        icon = self.icon_mgr.make_menu_icon("search")
+        if not icon.isNull():
+            explain_action.setIcon(icon)
+        explain_action.triggered.connect(lambda: self._open_explain_dialog(text_edit))
+        menu.addAction(explain_action)
+
         menu.exec(gpos)
 
     def _translate_selected(self, text_edit):
@@ -602,6 +622,25 @@ class PopupWindow(QWidget):
         scrollbar.setValue(scroll_pos)
 
     # ── Edit / Retranslate ─────────────────────────────────────────────
+
+    def _open_explain_dialog(self, text_edit=None):
+        """Open the explain dialog for AI Q&A."""
+        corrected = self.corrected_text_display.toPlainText()
+        translated = self.translated_text_display.toPlainText()
+
+        # Don't open if no content yet
+        if corrected in ("", "Correcting...") and translated in ("", "Translating..."):
+            return
+
+        # Get selected text if available
+        selected_text = ""
+        if text_edit:
+            cursor = text_edit.textCursor()
+            if cursor.hasSelection():
+                selected_text = cursor.selectedText().strip()
+
+        dialog = ExplainDialog(corrected, translated, selected_text, self)
+        dialog.show()
 
     def _toggle_edit_restore(self):
         if self.is_edit_mode:
