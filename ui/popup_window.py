@@ -144,7 +144,7 @@ class PopupWindow(QWidget):
     def _build_original_section(self, layout):
         layout.addWidget(self._section_title("Original Text"))
         self.original_text_display = TranslatableTextEdit()
-        self.original_text_display.setFont(QFont(Theme.Fonts.FAMILY_SECONDARY, Theme.Fonts.SIZE_NORMAL))
+        self.original_text_display.setFont(QFont(Theme.Fonts.FAMILY_SECONDARY, Theme.Fonts.SIZE_LARGE))
         self.original_text_display.setPlainText(self.original_text)
         self.original_text_display.setReadOnly(True)
         self.original_text_display.setMaximumHeight(56)
@@ -172,7 +172,7 @@ class PopupWindow(QWidget):
         layout.addLayout(hdr)
 
         self.corrected_text_display = TranslatableTextEdit()
-        self.corrected_text_display.setFont(QFont(Theme.Fonts.FAMILY_SECONDARY, Theme.Fonts.SIZE_NORMAL))
+        self.corrected_text_display.setFont(QFont(Theme.Fonts.FAMILY_SECONDARY, Theme.Fonts.SIZE_LARGE))
         self.corrected_text_display.setPlainText("Correcting...")
         self.corrected_text_display.setReadOnly(True)
         self.corrected_text_display.setStyleSheet(Theme.text_edit_style())
@@ -196,7 +196,7 @@ class PopupWindow(QWidget):
         layout.addLayout(hdr)
 
         self.translated_text_display = TranslatableTextEdit()
-        self.translated_text_display.setFont(QFont(Theme.Fonts.FAMILY_SECONDARY, Theme.Fonts.SIZE_NORMAL))
+        self.translated_text_display.setFont(QFont(Theme.Fonts.FAMILY_SECONDARY, Theme.Fonts.SIZE_LARGE))
         self.translated_text_display.setPlainText("Translating...")
         self.translated_text_display.setReadOnly(True)
         self.translated_text_display.setStyleSheet(Theme.text_edit_style())
@@ -211,7 +211,7 @@ class PopupWindow(QWidget):
         layout.addWidget(self._section_title("Quick Dictionary", icon_key="dictionary"))
 
         self.dictionary_display = TranslatableTextBrowser()
-        self.dictionary_display.setFont(QFont(Theme.Fonts.FAMILY_SECONDARY, Theme.Fonts.SIZE_NORMAL))
+        self.dictionary_display.setFont(QFont(Theme.Fonts.FAMILY_SECONDARY, Theme.Fonts.SIZE_LARGE))
         self.dictionary_display.setPlainText(
             "Select text in Corrected/Translated sections, then right-click 'Translate' to look up here.")
         self.dictionary_display.setOpenExternalLinks(True)

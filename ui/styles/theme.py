@@ -163,7 +163,7 @@ class Theme:
                 border: 1px solid {Theme.Colors.BORDER_LIGHT};
                 border-radius: {Theme.Radius.MD}px;
                 padding: {Theme.Spacing.SM}px;
-                font-size: {Theme.Fonts.SIZE_NORMAL}px;
+                font-size: {Theme.Fonts.SIZE_XLARGE}px;
                 selection-background-color: {Theme.Colors.PRIMARY};
                 selection-color: {Theme.Colors.WHITE};
             }}

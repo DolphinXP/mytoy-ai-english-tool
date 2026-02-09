@@ -22,6 +22,24 @@ class TTSServerSelectionDialog(QDialog):
         self.setWindowTitle("TTS Server Selection")
         self.setMinimumWidth(400)
 
+        # Apply dark theme to dialog
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {Theme.Colors.BG_PRIMARY};
+            }}
+            QLabel {{
+                color: {Theme.Colors.TEXT_PRIMARY};
+            }}
+            QRadioButton {{
+                color: {Theme.Colors.TEXT_PRIMARY};
+                spacing: {Theme.Spacing.SM}px;
+            }}
+            QRadioButton::indicator {{
+                width: 16px;
+                height: 16px;
+            }}
+        """)
+
         layout = QVBoxLayout()
         layout.setSpacing(Theme.Spacing.MD)
 
@@ -55,6 +73,7 @@ class TTSServerSelectionDialog(QDialog):
                 border: 1px solid {Theme.Colors.BORDER_LIGHT};
                 border-radius: {Theme.Radius.SM}px;
                 background-color: {Theme.Colors.BG_PRIMARY};
+                color: {Theme.Colors.TEXT_PRIMARY};
                 margin-left: {Theme.Spacing.LG}px;
                 margin-right: {Theme.Spacing.LG}px;
             }}
