@@ -2,36 +2,21 @@
 Main popup window for AI-TTS text processing, translation, and audio playback.
 Modern UI design with extracted components.
 """
-import os
-import time
-import queue
-import threading
-
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QPushButton,
-    QLabel, QApplication, QMenu
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QLabel, QApplication
 )
-from PySide6.QtCore import QTimer, QSettings, Qt as _Qt, Signal, QSize
-from PySide6.QtGui import QFont, QIcon, QAction, QCursor
-
-try:
-    import markdown
-    HAS_MARKDOWN = True
-except ImportError:
-    HAS_MARKDOWN = False
-    print("Warning: markdown library not installed. Dictionary will show plain text.")
+from PySide6.QtCore import QTimer, QSettings, Qt as _Qt, Signal
+from PySide6.QtGui import QFont
 
 from ui.styles.theme import Theme
 from ui.styles.icons import get_icon_manager
 from ui.widgets.translatable_text_edit import TranslatableTextEdit, TranslatableTextBrowser
-from ui.widgets.text_section import TextSection
 from ui.widgets.audio_controls import AudioControls
-from services.audio.streaming_player import StreamingAudioPlayer
-from services.audio.file_player import FileAudioPlayer
-from ui.dialogs.explain_dialog import ExplainDialog
+from ui.mixins import AudioMixin, DictionaryMixin, RetranslateMixin
 
 
-class PopupWindow(QWidget):
+class PopupWindow(AudioMixin, DictionaryMixin, RetranslateMixin, QWidget):
     """Main popup window for text correction, translation, and TTS."""
 
     exit_app_requested = Signal()
@@ -45,31 +30,16 @@ class PopupWindow(QWidget):
         self.thread_manager = thread_manager
         self.text_processor = text_processor
 
-        # Dictionary state
-        self.dictionary_thread = None
-        self._orphan_dictionary_threads = []
-        self._dictionary_markdown = ""
-
-        # Audio state
-        self.file_player = FileAudioPlayer()
-        self.streaming_player = None
-        self.is_streaming = False
-        self.is_playing = False
-        self.streaming_chunks_received = 0
-        self.streaming_position_at_end = 0
-        self._streaming_done = False
-        self._drain_idle_ticks = 0
-        self._last_stream_chunk_time = None
-
         # Icon manager
         self.icon_mgr = get_icon_manager()
 
         # Settings for position memory
         self.settings = QSettings('AI-TTS-App', 'PopupWindow')
 
-        # Edit mode state
-        self.original_corrected_text = ""
-        self.is_edit_mode = False
+        # Initialize mixin states
+        self._init_audio_state()
+        self._init_dictionary_state()
+        self._init_retranslate_state()
 
         self._init_ui()
         self._restore_position()
@@ -307,449 +277,6 @@ class PopupWindow(QWidget):
             f"Translation failed: {error_message}\n\nPlease try again.")
         self.set_status("Translation failed")
 
-    # ── Streaming audio ────────────────────────────────────────────────
-
-    def start_streaming_playback(self):
-        """Initialize streaming audio playback."""
-        if self.streaming_player is not None:
-            print("Stopping existing streaming player before starting new one")
-            self.streaming_player.stop()
-            if self.streaming_player.playback_thread and self.streaming_player.playback_thread.is_alive():
-                self.streaming_player.playback_thread.join(timeout=2.0)
-            self.streaming_player = None
-            time.sleep(0.2)
-
-        self.is_streaming = True
-        self.streaming_chunks_received = 0
-        self._streaming_done = False
-        self._drain_idle_ticks = 0
-        self._last_stream_chunk_time = None
-        self.streaming_player = StreamingAudioPlayer(sample_rate=24000)
-        self.streaming_player.start()
-        self.is_playing = True
-
-        self.audio_controls.set_playing(True)
-        self.audio_controls.set_enabled(True)
-        self.progress_timer.start(100)
-        self.set_status(self.icon_mgr.get_icon_label("audio", "Streaming audio..."))
-        print("Streaming playback started")
-
-    def on_audio_chunk_ready(self, audio_bytes, sample_rate):
-        """Handle incoming audio chunk for streaming playback."""
-        sender = self.sender()
-        if hasattr(self, 'retranslate_tts_thread') and sender != self.retranslate_tts_thread:
-            return
-
-        if not self.is_streaming:
-            self.start_streaming_playback()
-
-        self.streaming_chunks_received += 1
-        self._last_stream_chunk_time = time.time()
-        self._drain_idle_ticks = 0
-
-        if self.streaming_player:
-            self.streaming_player.add_audio_chunk(audio_bytes)
-
-        self.set_status(self.icon_mgr.get_icon_label(
-            "audio", f"Streaming audio... ({self.streaming_chunks_received} chunks)"))
-
-    def stop_streaming_playback(self, wait_for_completion=False):
-        """Stop streaming audio playback."""
-        if self.streaming_player:
-            if wait_for_completion:
-                timeout_time = time.time() + 5
-                while not self.streaming_player.audio_queue.empty():
-                    if time.time() > timeout_time:
-                        break
-                    time.sleep(0.1)
-
-            self.streaming_position_at_end = self.streaming_player.get_current_position()
-            print(f"Streaming ended at position: {self.streaming_position_at_end:.2f}s")
-            self.streaming_player.stop()
-            if self.streaming_player.playback_thread and self.streaming_player.playback_thread.is_alive():
-                self.streaming_player.playback_thread.join(timeout=2.0)
-            self.streaming_player = None
-
-        self.is_streaming = False
-        self.is_playing = False
-        self.audio_controls.set_playing(False)
-        self.progress_timer.stop()
-        self._streaming_done = False
-        self._drain_idle_ticks = 0
-        self.audio_controls.set_progress_range(0, 100)
-        self.audio_controls.set_progress(0)
-        self.audio_controls.set_time(0, self.file_player.audio_length)
-        print("Streaming playback stopped")
-
-    # ── File audio ─────────────────────────────────────────────────────
-
-    def set_audio_ready(self, audio_file_path):
-        """Called when audio file is ready for playback."""
-        self.file_player.load_audio(audio_file_path)
-        print(f"Audio file: {audio_file_path}, length: {self.file_player.audio_length}s")
-
-        if self.is_streaming:
-            self.set_status("Draining audio buffer...")
-            self._streaming_done = True
-        else:
-            self.set_status(self.icon_mgr.get_icon_label("ready", "Audio ready"))
-
-        self.audio_controls.set_enabled(True)
-        self.audio_controls.set_time(0, self.file_player.audio_length)
-
-    def set_audio_error(self, error_message):
-        """Called when audio generation fails."""
-        self.set_status(self.icon_mgr.get_icon_label("error", f"Audio error: {error_message}"))
-        self.audio_controls.set_enabled(False)
-        if self.is_streaming:
-            self.stop_streaming_playback()
-
-    # ── Playback controls ──────────────────────────────────────────────
-
-    def _on_play(self):
-        if self.is_streaming:
-            self.stop_streaming_playback()
-        elif not self.is_playing:
-            self._start_file_playback()
-
-    def _on_stop(self):
-        if self.is_streaming:
-            self.stop_streaming_playback()
-        elif self.is_playing:
-            self._stop_file_playback()
-
-    def _start_file_playback(self):
-        if self.file_player.play():
-            self.is_playing = True
-            self.audio_controls.set_playing(True)
-            self.progress_timer.start(100)
-
-    def _stop_file_playback(self):
-        self.file_player.stop()
-        self.is_playing = False
-        self.streaming_position_at_end = 0
-        self.audio_controls.set_playing(False)
-        self.audio_controls.set_progress(0)
-        self.audio_controls.set_time(0, self.file_player.audio_length)
-        self.progress_timer.stop()
-        print("Audio playback stopped")
-
-    # ── Progress timer ─────────────────────────────────────────────────
-
-    def _update_progress(self):
-        if self.is_streaming and self.streaming_player:
-            pos = self.streaming_player.get_current_position()
-            secs = int(pos)
-            self.audio_controls.set_time_text(f"{secs // 60:02d}:{secs % 60:02d} / --:--")
-            self.audio_controls.set_progress_range(0, 0)  # indeterminate
-
-            if self._streaming_done:
-                if self.streaming_player.audio_queue.empty():
-                    last = self._last_stream_chunk_time or time.time()
-                    if time.time() - last >= 0.5:
-                        self._drain_idle_ticks += 1
-                else:
-                    self._drain_idle_ticks = 0
-
-                if self._drain_idle_ticks >= 2:
-                    print("Streaming playback completed")
-                    self.stop_streaming_playback(wait_for_completion=False)
-                    self._streaming_done = False
-                    self._drain_idle_ticks = 0
-                    self.set_status(self.icon_mgr.get_icon_label("ready", "Audio ready"))
-                    return
-
-        elif self.is_playing:
-            self.file_player.update_position()
-            pos = self.file_player.current_position
-            length = self.file_player.audio_length
-
-            self.audio_controls.set_progress_range(0, 100)
-            if length > 0:
-                self.audio_controls.set_progress(min(100, (pos / length) * 100))
-            self.audio_controls.set_time(pos, length)
-
-            if self.file_player.is_finished() if hasattr(self.file_player, 'is_finished') else not self.file_player.is_busy():
-                print("Audio playback completed")
-                self._stop_file_playback()
-
-    # ── Context menu & dictionary ──────────────────────────────────────
-
-    def _copy_text(self, text_widget):
-        text = text_widget.toPlainText()
-        placeholder = {"Correcting...", "Translating..."}
-        if text and text not in placeholder:
-            QApplication.clipboard().setText(text)
-
-    def _show_context_menu(self, text_edit, pos):
-        menu = QMenu(self)
-        menu.setStyleSheet(Theme.menu_style())
-
-        cursor = text_edit.textCursor()
-
-        copy_action = QAction("Copy", self)
-        icon = self.icon_mgr.make_menu_icon("copy")
-        if not icon.isNull():
-            copy_action.setIcon(icon)
-        copy_action.triggered.connect(text_edit.copy)
-        copy_action.setEnabled(cursor.hasSelection())
-        menu.addAction(copy_action)
-
-        sel_all_action = QAction("Select All", self)
-        icon = self.icon_mgr.make_menu_icon("select_all")
-        if not icon.isNull():
-            sel_all_action.setIcon(icon)
-        sel_all_action.triggered.connect(text_edit.selectAll)
-        menu.addAction(sel_all_action)
-
-        menu.addSeparator()
-
-        translate_action = QAction(
-            self.icon_mgr.get_icon_label("search", "Translate to Dictionary"), self)
-        icon = self.icon_mgr.make_menu_icon("translate")
-        if not icon.isNull():
-            translate_action.setIcon(icon)
-        translate_action.triggered.connect(lambda: self._translate_selected(text_edit))
-        translate_action.setEnabled(cursor.hasSelection())
-        menu.addAction(translate_action)
-
-        explain_action = QAction("Explain with AI", self)
-        icon = self.icon_mgr.make_menu_icon("search")
-        if not icon.isNull():
-            explain_action.setIcon(icon)
-        explain_action.triggered.connect(lambda: self._open_explain_dialog(text_edit))
-        menu.addAction(explain_action)
-
-        menu.exec(text_edit.mapToGlobal(pos))
-
-    def _show_translate_menu(self, text_edit):
-        cursor = text_edit.textCursor()
-        if not cursor.hasSelection():
-            return
-
-        gpos = QCursor.pos()
-        gpos.setX(gpos.x() - 20)
-        gpos.setY(gpos.y() - 10)
-
-        menu = QMenu(self)
-        menu.setStyleSheet(Theme.menu_style())
-        action = QAction(self.icon_mgr.get_icon_label("search", "Translate to Dictionary"), self)
-        icon = self.icon_mgr.make_menu_icon("translate")
-        if not icon.isNull():
-            action.setIcon(icon)
-        action.triggered.connect(lambda: self._translate_selected(text_edit))
-        menu.addAction(action)
-
-        explain_action = QAction("Explain with AI", self)
-        icon = self.icon_mgr.make_menu_icon("search")
-        if not icon.isNull():
-            explain_action.setIcon(icon)
-        explain_action.triggered.connect(lambda: self._open_explain_dialog(text_edit))
-        menu.addAction(explain_action)
-
-        menu.exec(gpos)
-
-    def _translate_selected(self, text_edit):
-        cursor = text_edit.textCursor()
-        selected = cursor.selectedText().strip()
-        if not selected:
-            return
-
-        full_text = text_edit.toPlainText()
-        self._dictionary_markdown = ""
-        translating_prefix = self.icon_mgr.get_icon_label("translating", "Translating:")
-        self.dictionary_display.setPlainText(f"{translating_prefix} {selected}...")
-
-        if self.dictionary_thread and self.dictionary_thread.isRunning():
-            self._stop_dictionary_thread(immediate=True)
-
-        from services.api.dictionary import DictionaryThread
-        self.dictionary_thread = DictionaryThread(selected, full_text)
-        self.dictionary_thread.translation_chunk.connect(self._on_dict_chunk)
-        self.dictionary_thread.translation_done.connect(self._on_dict_done)
-        self.dictionary_thread.start()
-
-    def _stop_dictionary_thread(self, immediate=False):
-        if not self.dictionary_thread or not self.dictionary_thread.isRunning():
-            return
-        try:
-            self.dictionary_thread.translation_chunk.disconnect()
-            self.dictionary_thread.translation_done.disconnect()
-        except:
-            pass
-        self.dictionary_thread.stop()
-        if immediate:
-            if not self.dictionary_thread.wait(150):
-                self.dictionary_thread.terminate()
-                self.dictionary_thread.wait(150)
-        else:
-            self.dictionary_thread.finished.connect(self._cleanup_orphan_threads)
-            self._orphan_dictionary_threads.append(self.dictionary_thread)
-        self.dictionary_thread = None
-
-    def _cleanup_orphan_threads(self):
-        self._orphan_dictionary_threads = [t for t in self._orphan_dictionary_threads if t.isRunning()]
-
-    def _on_dict_chunk(self, chunk):
-        self._dictionary_markdown += chunk
-        self._render_dictionary()
-
-    def _on_dict_done(self, result):
-        if self._dictionary_markdown:
-            self._render_dictionary()
-
-    def _render_dictionary(self):
-        scrollbar = self.dictionary_display.verticalScrollBar()
-        scroll_pos = scrollbar.value()
-
-        if HAS_MARKDOWN:
-            html = markdown.markdown(self._dictionary_markdown, extensions=['extra', 'nl2br', 'sane_lists'])
-            styled = f"""
-            <style>
-                body {{ font-family: '{Theme.Fonts.FAMILY_SECONDARY}', sans-serif; line-height: 1.6; }}
-                h1, h2, h3 {{ color: {Theme.Colors.GRAY_800}; margin-top: 10px; }}
-                strong {{ color: {Theme.Colors.PRIMARY}; }}
-                code {{ background-color: {Theme.Colors.GRAY_100}; padding: 2px 5px; border-radius: 3px; }}
-                ul, ol {{ margin-left: 20px; }}
-                p {{ margin: 5px 0; }}
-            </style>
-            {html}
-            """
-            self.dictionary_display.setHtml(styled)
-        else:
-            self.dictionary_display.setPlainText(self._dictionary_markdown)
-
-        scrollbar.setValue(scroll_pos)
-
-    # ── Edit / Retranslate ─────────────────────────────────────────────
-
-    def _open_explain_dialog(self, text_edit=None):
-        """Open the explain dialog for AI Q&A."""
-        corrected = self.corrected_text_display.toPlainText()
-        translated = self.translated_text_display.toPlainText()
-
-        # Don't open if no content yet
-        if corrected in ("", "Correcting...") and translated in ("", "Translating..."):
-            return
-
-        # Get selected text if available
-        selected_text = ""
-        if text_edit:
-            cursor = text_edit.textCursor()
-            if cursor.hasSelection():
-                selected_text = cursor.selectedText().strip()
-
-        dialog = ExplainDialog(corrected, translated, selected_text, self)
-        dialog.show()
-
-    def _toggle_edit_restore(self):
-        if self.is_edit_mode:
-            self.corrected_text_display.setPlainText(self.original_corrected_text)
-            self.corrected_text = self.original_corrected_text
-            self.corrected_text_display.setReadOnly(True)
-            self.edit_restore_btn.setText("Edit")
-            self.edit_restore_btn.setStyleSheet(Theme.button_style("primary"))
-            self.is_edit_mode = False
-        else:
-            self.corrected_text_display.setPlainText(self.original_corrected_text)
-            self.corrected_text_display.setReadOnly(False)
-            self.edit_restore_btn.setText("Restore")
-            self.edit_restore_btn.setStyleSheet(Theme.button_style("danger"))
-            self.is_edit_mode = True
-            self.corrected_text_display.setFocus()
-
-    def _retranslate_text(self):
-        current_time = time.time()
-        if hasattr(self, '_last_retranslate_time') and (current_time - self._last_retranslate_time) < 1.0:
-            return
-        self._last_retranslate_time = current_time
-
-        text = self.corrected_text_display.toPlainText().strip()
-        if not text:
-            return
-
-        self.corrected_text = text
-        self.translated_text_display.setPlainText("Translating...")
-        self.set_status("Retranslating and regenerating audio...")
-
-        if self.is_streaming:
-            self.stop_streaming_playback()
-            time.sleep(0.1)
-        elif self.is_playing:
-            self._stop_file_playback()
-
-        self.audio_controls.set_enabled(False)
-
-        # Start translation
-        from services.api.translation import TranslationThread
-        if hasattr(self, 'retranslation_thread') and self.retranslation_thread and self.retranslation_thread.isRunning():
-            self.retranslation_thread.terminate()
-            self.retranslation_thread.wait(1000)
-
-        self.retranslation_thread = TranslationThread(text, 'deepseek')
-        self.retranslation_thread.translation_done.connect(self._on_retranslation_done)
-        self.retranslation_thread.translation_chunk.connect(self._on_retranslation_chunk)
-        self.retranslation_thread.translation_error.connect(self._on_retranslation_error)
-        self.retranslation_thread.start()
-
-        # Start TTS
-        self._start_retranslate_tts(text)
-
-    def _on_retranslation_chunk(self, chunk):
-        cur = self.translated_text_display.toPlainText()
-        if cur == "Translating...":
-            cur = ""
-        self.translated_text_display.setPlainText(cur + chunk)
-
-    def _on_retranslation_done(self, text):
-        self.translated_text = text
-        self.translated_text_display.setPlainText(text)
-        if hasattr(self, 'retranslate_tts_thread') and self.retranslate_tts_thread and self.retranslate_tts_thread.isRunning():
-            self.set_status("Retranslation done. Generating audio...")
-        self.retranslation_thread = None
-
-    def _on_retranslation_error(self, msg):
-        self.translated_text_display.setPlainText(f"Translation failed: {msg}\n\nPlease try again.")
-        self.set_status("Translation failed")
-        self.retranslation_thread = None
-
-    def _start_retranslate_tts(self, tts_text):
-        try:
-            from services.tts.remote_tts import RemoteTTSManager
-            remote_manager = RemoteTTSManager()
-
-            if hasattr(self, 'retranslate_tts_thread') and self.retranslate_tts_thread:
-                try:
-                    self.retranslate_tts_thread.tts_completed.disconnect()
-                    self.retranslate_tts_thread.tts_error.disconnect()
-                    self.retranslate_tts_thread.progress_update.disconnect()
-                    self.retranslate_tts_thread.audio_chunk_ready.disconnect()
-                except:
-                    pass
-                if self.retranslate_tts_thread.isRunning():
-                    self.retranslate_tts_thread.stop()
-                    if not self.retranslate_tts_thread.wait(3000):
-                        self.retranslate_tts_thread.terminate()
-                        self.retranslate_tts_thread.wait(1000)
-                self.retranslate_tts_thread = None
-
-            time.sleep(1.0)
-
-            self.retranslate_tts_thread = remote_manager.create_tts_thread(
-                text=tts_text,
-                server_url="ws://10.110.31.157:3000/stream",
-                streaming=True
-            )
-            self.retranslate_tts_thread.tts_completed.connect(lambda p: self.set_audio_ready(p))
-            self.retranslate_tts_thread.tts_error.connect(lambda m: self.set_audio_error(m))
-            self.retranslate_tts_thread.progress_update.connect(lambda m: self.set_status(m))
-            self.retranslate_tts_thread.audio_chunk_ready.connect(self.on_audio_chunk_ready)
-            self.retranslate_tts_thread.start()
-
-        except Exception as e:
-            print(f"Failed to start retranslate TTS: {e}")
-            self.set_audio_error(f"Failed to start TTS: {str(e)}")
-
     # ── Window position persistence ────────────────────────────────────
 
     def _restore_position(self):
@@ -800,57 +327,14 @@ class PopupWindow(QWidget):
         self.popup_destroyed.emit()
         self._save_position()
 
-        if self.is_streaming:
-            self.stop_streaming_playback()
-        if self.is_playing:
-            self._stop_file_playback()
+        # Cleanup from mixins
+        self._cleanup_audio()
+        self._cleanup_dictionary()
+        self._cleanup_retranslate()
 
         if hasattr(self, 'auto_close_timer'):
             self.auto_close_timer.stop()
         if hasattr(self, 'progress_timer'):
             self.progress_timer.stop()
-
-        # Stop dictionary thread
-        if self.dictionary_thread and self.dictionary_thread.isRunning():
-            try:
-                self.dictionary_thread.translation_chunk.disconnect()
-                self.dictionary_thread.translation_done.disconnect()
-            except:
-                pass
-            self.dictionary_thread.stop()
-            if not self.dictionary_thread.wait(1000):
-                self.dictionary_thread.terminate()
-                self.dictionary_thread.wait(500)
-            self.dictionary_thread = None
-
-        # Stop retranslation thread
-        if hasattr(self, 'retranslation_thread') and self.retranslation_thread and self.retranslation_thread.isRunning():
-            try:
-                self.retranslation_thread.translation_chunk.disconnect()
-                self.retranslation_thread.translation_done.disconnect()
-                self.retranslation_thread.translation_error.disconnect()
-            except:
-                pass
-            self.retranslation_thread.terminate()
-            self.retranslation_thread.wait(1000)
-            self.retranslation_thread = None
-
-        # Stop retranslate TTS thread
-        if hasattr(self, 'retranslate_tts_thread') and self.retranslate_tts_thread and self.retranslate_tts_thread.isRunning():
-            try:
-                self.retranslate_tts_thread.tts_completed.disconnect()
-                self.retranslate_tts_thread.tts_error.disconnect()
-                self.retranslate_tts_thread.progress_update.disconnect()
-                self.retranslate_tts_thread.audio_chunk_ready.disconnect()
-            except:
-                pass
-            self.retranslate_tts_thread.stop()
-            if not self.retranslate_tts_thread.wait(5000):
-                self.retranslate_tts_thread.terminate()
-                self.retranslate_tts_thread.wait(1000)
-            self.retranslate_tts_thread = None
-
-        # Clean up audio file
-        self.file_player.cleanup()
 
         event.accept()
