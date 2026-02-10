@@ -92,8 +92,8 @@ class FloatingContextMenu(QWidget):
         Show the menu at the specified screen coordinates.
 
         Args:
-            x: Screen X coordinate
-            y: Screen Y coordinate
+            x: Screen X coordinate (physical pixels from pynput)
+            y: Screen Y coordinate (physical pixels from pynput)
             text: Optional text to use. If None, will try to get from clipboard.
         """
         self._selected_text = text or ""
@@ -106,22 +106,30 @@ class FloatingContextMenu(QWidget):
             print("No text selected, not showing menu")
             return
 
+        # Convert physical pixel coordinates (from pynput) to logical pixel
+        # coordinates (for Qt). On Windows with DPI scaling (e.g. 125%, 150%),
+        # pynput reports raw physical pixels while Qt uses logical pixels.
+        screen = QApplication.primaryScreen()
+        dpr = screen.devicePixelRatio()
+        logical_x = int(x / dpr)
+        logical_y = int(y / dpr)
+
         # Position the menu near the cursor but ensure it's on screen
-        screen = QApplication.primaryScreen().geometry()
+        screen_geo = screen.geometry()
         menu_width = self.sizeHint().width()
         menu_height = self.sizeHint().height()
 
         # Adjust position to keep menu on screen
-        if x + menu_width > screen.right():
-            x = screen.right() - menu_width - 10
-        if y + menu_height > screen.bottom():
-            y = screen.bottom() - menu_height - 10
-        if x < screen.left():
-            x = screen.left() + 10
-        if y < screen.top():
-            y = screen.top() + 10
+        if logical_x + menu_width > screen_geo.right():
+            logical_x = screen_geo.right() - menu_width - 10
+        if logical_y + menu_height > screen_geo.bottom():
+            logical_y = screen_geo.bottom() - menu_height - 10
+        if logical_x < screen_geo.left():
+            logical_x = screen_geo.left() + 10
+        if logical_y < screen_geo.top():
+            logical_y = screen_geo.top() + 10
 
-        self.move(x, y)
+        self.move(logical_x, logical_y)
         self.show()
         self.raise_()
         self.activateWindow()
