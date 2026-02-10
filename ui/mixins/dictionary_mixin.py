@@ -54,8 +54,7 @@ class DictionaryMixin:
 
         menu.addSeparator()
 
-        translate_action = QAction(
-            self.icon_mgr.get_icon_label("search", "Translate to Dictionary"), self)
+        translate_action = QAction("Translate to Dictionary", self)
         icon = self.icon_mgr.make_menu_icon("translate")
         if not icon.isNull():
             translate_action.setIcon(icon)
@@ -83,7 +82,7 @@ class DictionaryMixin:
 
         menu = QMenu(self)
         menu.setStyleSheet(Theme.menu_style())
-        action = QAction(self.icon_mgr.get_icon_label("search", "Translate to Dictionary"), self)
+        action = QAction("Translate to Dictionary", self)
         icon = self.icon_mgr.make_menu_icon("translate")
         if not icon.isNull():
             action.setIcon(icon)
@@ -156,10 +155,14 @@ class DictionaryMixin:
             html = markdown.markdown(self._dictionary_markdown, extensions=['extra', 'nl2br', 'sane_lists'])
             styled = f"""
             <style>
-                body {{ font-family: '{Theme.Fonts.FAMILY_SECONDARY}', sans-serif; line-height: 1.6; }}
-                h1, h2, h3 {{ color: {Theme.Colors.GRAY_800}; margin-top: 10px; }}
-                strong {{ color: {Theme.Colors.PRIMARY}; }}
-                code {{ background-color: {Theme.Colors.GRAY_100}; padding: 2px 5px; border-radius: 3px; }}
+                body {{
+                    font-family: '{Theme.Fonts.FAMILY_SECONDARY}', sans-serif;
+                    line-height: 1.6;
+                    color: {Theme.Colors.TEXT_PRIMARY};
+                }}
+                h1, h2, h3 {{ color: {Theme.Colors.GRAY_300}; margin-top: 10px; }}
+                strong {{ color: {Theme.Colors.PRIMARY_LIGHT}; }}
+                code {{ background-color: {Theme.Colors.GRAY_600}; padding: 2px 5px; border-radius: 3px; }}
                 ul, ol {{ margin-left: 20px; }}
                 p {{ margin: 5px 0; }}
             </style>

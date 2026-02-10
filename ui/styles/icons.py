@@ -82,6 +82,7 @@ class IconManager:
             "copy": "\uE8C8",
             "select_all": "\uE8B3",
             "translate": "\uE721",
+            "search": "\uE99A",
         }
 
     def _get_button_glyphs(self):
@@ -93,6 +94,7 @@ class IconManager:
             "play": "\uE768",
             "stop": "\uE769",
             "close": "\uE711",
+            "search": "\uE99A",
         }
 
     def get_icon_label(self, key, text):
@@ -130,7 +132,7 @@ class IconManager:
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
         painter.setFont(font)
-        painter.setPen(QColor(40, 40, 40))
+        painter.setPen(Qt.white)
         painter.drawText(pixmap.rect(), Qt.AlignCenter, glyph)
         painter.end()
         return QIcon(pixmap)
@@ -154,7 +156,7 @@ class IconManager:
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
         painter.setFont(font)
-        painter.setPen(QColor(40, 40, 40))
+        painter.setPen(Qt.white)
         painter.setRenderHint(QPainter.TextAntialiasing)
         painter.drawText(pixmap.rect(), Qt.AlignCenter, glyph)
         painter.end()
