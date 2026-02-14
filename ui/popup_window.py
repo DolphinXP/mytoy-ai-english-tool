@@ -315,6 +315,12 @@ class PopupWindow(AudioMixin, DictionaryMixin, RetranslateMixin, QWidget):
         self.exit_app_requested.emit()
         self.close()
 
+    def keyPressEvent(self, event):
+        if event.key() == _Qt.Key.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(event)
+
     def closeEvent(self, event):
         self.popup_destroyed.emit()
         self._save_position()
