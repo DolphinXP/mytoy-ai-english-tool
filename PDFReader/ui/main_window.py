@@ -30,11 +30,11 @@ if _parent_dir not in sys.path:
 
 
 DARK_THEME = """
-    QMainWindow, QWidget { background-color: #1e1e1e; color: #ffffff; }
+    QMainWindow, QWidget { background-color: #1e1e1e; color: #d4d4d4; }
     QSplitter::handle { background-color: #333333; }
-    QMessageBox { background-color: #2d2d2d; color: #ffffff; }
-    QMessageBox QPushButton { background-color: #0078d4; color: #ffffff; border: none; padding: 6px 16px; border-radius: 4px; }
-    QMessageBox QPushButton:hover { background-color: #1084d8; }
+    QMessageBox { background-color: #252526; color: #d4d4d4; }
+    QMessageBox QPushButton { background-color: #0e639c; color: #ffffff; border: none; padding: 6px 16px; border-radius: 4px; }
+    QMessageBox QPushButton:hover { background-color: #1177bb; }
 """
 
 
@@ -74,20 +74,21 @@ class MainWindow(QMainWindow):
         """Create the File menu and attach it to the toolbar."""
         menu_style = """
             QMenu {
-                background-color: #2d2d2d;
-                border: 1px solid #454545;
-                color: #ffffff;
+                background-color: #252526;
+                border: 1px solid #3c3c3c;
+                color: #d4d4d4;
                 padding: 4px 0;
             }
             QMenu::item {
                 padding: 6px 30px 6px 20px;
             }
             QMenu::item:selected {
-                background-color: #0078d4;
+                background-color: #0e639c;
+                color: #ffffff;
             }
             QMenu::separator {
                 height: 1px;
-                background-color: #454545;
+                background-color: #3c3c3c;
                 margin: 4px 8px;
             }
         """
@@ -277,6 +278,7 @@ class MainWindow(QMainWindow):
         self._toolbar.zoom_fit_width_clicked.connect(self._fit_to_width)
         self._toolbar.zoom_fit_window_clicked.connect(self._fit_to_window)
         self._toolbar.zoom_level_changed.connect(self._app.set_zoom)
+        self._toolbar.regenerate_clicked.connect(self._on_regenerate)
         self._toolbar.toggle_annotations_clicked.connect(
             self._toggle_annotation_panel)
 
@@ -311,7 +313,6 @@ class MainWindow(QMainWindow):
         self._annotation_panel.tts_stop_clicked.connect(self._on_tts_stop)
         self._annotation_panel.tts_settings_clicked.connect(
             self._on_tts_settings)
-        self._annotation_panel.regenerate_clicked.connect(self._on_regenerate)
 
         # Annotation manager
         self._app.annotation_manager.annotations_loaded.connect(
@@ -733,12 +734,12 @@ class MainWindow(QMainWindow):
         dialog.setWindowTitle("TTS Settings")
         dialog.setFixedWidth(400)
         dialog.setStyleSheet("""
-            QDialog { background-color: #2d2d2d; color: #ffffff; }
-            QLabel { color: #cccccc; }
-            QRadioButton { color: #cccccc; }
+            QDialog { background-color: #252526; color: #d4d4d4; }
+            QLabel { color: #d4d4d4; }
+            QRadioButton { color: #d4d4d4; }
             QLineEdit {
-                background-color: #3c3c3c; color: #ffffff;
-                border: 1px solid #555; border-radius: 4px; padding: 4px;
+                background-color: #3c3c3c; color: #d4d4d4;
+                border: 1px solid #3f3f46; border-radius: 4px; padding: 4px;
             }
         """)
 
@@ -765,8 +766,8 @@ class MainWindow(QMainWindow):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.setStyleSheet("""
-            QPushButton { background-color: #0078d4; color: white; border: none; padding: 6px 16px; border-radius: 4px; }
-            QPushButton:hover { background-color: #1084d8; }
+            QPushButton { background-color: #0e639c; color: white; border: none; padding: 6px 16px; border-radius: 4px; }
+            QPushButton:hover { background-color: #1177bb; }
         """)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)

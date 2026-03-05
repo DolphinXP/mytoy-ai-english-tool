@@ -4,19 +4,55 @@ Annotation panel widget with embedded AI results display.
 Contains an annotation list and a detail view that shows AI processing
 results (correction, translation, explanation) for the selected annotation.
 """
-from typing import Optional, List
+from typing import List
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QTextEdit, QSizePolicy, QSplitter,
-    QApplication, QSlider, QProgressBar
+    QApplication, QProgressBar, QStyle
 )
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QFont, QIcon, QPixmap, QPainter, QColor
 
 from PDFReader.models.annotation import Annotation
 
 
-# ─── Annotation Card ──────────────────────────────────────────────────────────
+def _create_text_icon(text: str, size: int = 20, color: str = "#d4d4d4") -> QIcon:
+    """Create an icon from text/symbol."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+    
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.TextAntialiasing)
+    
+    # Use a clear, readable font
+    font = QFont("Segoe UI Symbol", int(size * 0.7))
+    painter.setFont(font)
+    painter.setPen(QColor(color))
+    
+    # Center the text
+    painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
+    painter.end()
+    
+    return QIcon(pixmap)
+
+
+def _light_icon(widget: QWidget, standard_pixmap: QStyle.StandardPixmap, size: int = 18) -> QIcon:
+    """Create a light-tinted icon from Qt standard pixmaps for dark theme."""
+    # Try to get the standard icon directly - it may already be styled correctly
+    icon = widget.style().standardIcon(standard_pixmap)
+    if not icon.isNull():
+        return icon
+    
+    # Fallback: get pixmap and try to tint it
+    source = widget.style().standardPixmap(standard_pixmap)
+    if source.isNull():
+        return QIcon()
+
+    # Scale to desired size
+    scaled = source.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    return QIcon(scaled)
+
 
 class AnnotationCard(QFrame):
     """Card widget displaying a single annotation summary."""
@@ -43,18 +79,42 @@ class AnnotationCard(QFrame):
         top_row = QHBoxLayout()
         page_label = QLabel(f"Page {self._annotation.page_number + 1}")
         page_label.setStyleSheet(
-            "color: #888888; font-size: 11px; background: transparent; border: none;")
+            "color: #a0a0a0; font-size: 11px; background: transparent; border: none;")
         top_row.addWidget(page_label)
+
+        # Status indicator next to page label to save vertical space
+        status_parts = []
+        if self._annotation.corrected_text:
+            status_parts.append("Corrected")
+        if self._annotation.translated_text:
+            status_parts.append("Translated")
+        if self._annotation.explanation:
+            status_parts.append("Explained")
+
+        if status_parts:
+            status_label = QLabel(" | ".join(status_parts))
+            status_label.setStyleSheet(
+                "color: #89d185; font-size: 10px; background: transparent; border: none;")
+            top_row.addWidget(status_label)
+        else:
+            pending_label = QLabel("Processing...")
+            pending_label.setStyleSheet(
+                "color: #cca700; font-size: 10px; background: transparent; border: none;")
+            top_row.addWidget(pending_label)
+
         top_row.addStretch()
 
-        delete_btn = QPushButton("✕")
+        delete_btn = QPushButton("X")
         delete_btn.setFixedSize(20, 20)
+        delete_btn.setToolTip("Delete annotation")
         delete_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: none; font-size: 12px; color: #666666; }
-            QPushButton:hover { background-color: #4a2020; border-radius: 4px; color: #ff6666; }
+            QPushButton { background: transparent; border: none; font-size: 11px; color: #8a8a8a; }
+            QPushButton:hover { background-color: #4a2020; border-radius: 4px; color: #f48771; }
         """)
         delete_btn.clicked.connect(
             lambda: self.delete_clicked.emit(self._annotation.id))
+        delete_btn.setIcon(_create_text_icon("✕", 20, "#d4d4d4"))
+        delete_btn.setIconSize(QSize(20, 20))
         top_row.addWidget(delete_btn)
         layout.addLayout(top_row)
 
@@ -65,28 +125,8 @@ class AnnotationCard(QFrame):
         text_label = QLabel(preview)
         text_label.setWordWrap(True)
         text_label.setStyleSheet(
-            "color: #e0e0e0; font-size: 12px; background: transparent; border: none;")
+            "color: #d4d4d4; font-size: 12px; background: transparent; border: none;")
         layout.addWidget(text_label)
-
-        # Status indicator
-        status_parts = []
-        if self._annotation.corrected_text:
-            status_parts.append("✓ Corrected")
-        if self._annotation.translated_text:
-            status_parts.append("✓ Translated")
-        if self._annotation.explanation:
-            status_parts.append("✓ Explained")
-
-        if status_parts:
-            status_label = QLabel("  ".join(status_parts))
-            status_label.setStyleSheet(
-                "color: #4ec9b0; font-size: 10px; background: transparent; border: none;")
-            layout.addWidget(status_label)
-        else:
-            pending_label = QLabel("⏳ Processing...")
-            pending_label.setStyleSheet(
-                "color: #d7ba7d; font-size: 10px; background: transparent; border: none;")
-            layout.addWidget(pending_label)
 
     def set_selected(self, selected: bool):
         """Set the selected visual state."""
@@ -97,8 +137,8 @@ class AnnotationCard(QFrame):
         if self._selected:
             self.setStyleSheet("""
                 AnnotationCard {
-                    background-color: #264f78;
-                    border: 1px solid #0078d4;
+                    background-color: #094771;
+                    border: 1px solid #0e639c;
                     border-radius: 6px;
                     margin: 2px;
                 }
@@ -107,13 +147,13 @@ class AnnotationCard(QFrame):
             self.setStyleSheet("""
                 AnnotationCard {
                     background-color: #2d2d2d;
-                    border: 1px solid #404040;
+                    border: 1px solid #3c3c3c;
                     border-radius: 6px;
                     margin: 2px;
                 }
                 AnnotationCard:hover {
-                    border-color: #0078d4;
-                    background-color: #363636;
+                    border-color: #0e639c;
+                    background-color: #333333;
                 }
             """)
 
@@ -127,8 +167,6 @@ class AnnotationCard(QFrame):
         return self._annotation
 
 
-# ─── Annotation Detail View ──────────────────────────────────────────────────
-
 class AnnotationDetailView(QWidget):
     """Detail view showing AI results for a selected annotation."""
 
@@ -139,7 +177,6 @@ class AnnotationDetailView(QWidget):
     tts_play_clicked = Signal()
     tts_stop_clicked = Signal()
     tts_settings_clicked = Signal()
-    regenerate_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -171,7 +208,9 @@ class AnnotationDetailView(QWidget):
         corrected_header.addWidget(self._section_label("Corrected"))
         self._copy_corrected_btn = self._small_btn("Copy")
         self._copy_corrected_btn.clicked.connect(
-            lambda: self._copy_text('corrected'))
+            lambda: self._copy_text("corrected"))
+        self._copy_corrected_btn.setIcon(_create_text_icon("📋", 20, "#d4d4d4"))
+        self._copy_corrected_btn.setIconSize(QSize(20, 20))
         corrected_header.addWidget(self._copy_corrected_btn)
         corrected_header.addStretch()
         content_layout.addLayout(corrected_header)
@@ -184,10 +223,14 @@ class AnnotationDetailView(QWidget):
         trans_header.addWidget(self._section_label("Translation"))
         self._copy_trans_btn = self._small_btn("Copy")
         self._copy_trans_btn.clicked.connect(
-            lambda: self._copy_text('translated'))
+            lambda: self._copy_text("translated"))
+        self._copy_trans_btn.setIcon(_create_text_icon("📋", 20, "#d4d4d4"))
+        self._copy_trans_btn.setIconSize(QSize(20, 20))
         trans_header.addWidget(self._copy_trans_btn)
         self._retranslate_btn = self._small_btn("Re-translate", max_width=110)
         self._retranslate_btn.clicked.connect(self.retranslate_clicked.emit)
+        self._retranslate_btn.setIcon(_create_text_icon("↻", 20, "#d4d4d4"))
+        self._retranslate_btn.setIconSize(QSize(20, 20))
         trans_header.addWidget(self._retranslate_btn)
         trans_header.addStretch()
         content_layout.addLayout(trans_header)
@@ -195,26 +238,27 @@ class AnnotationDetailView(QWidget):
         self._translated_display = self._create_text_display(120)
         content_layout.addWidget(self._translated_display)
 
-        # Explanation (stretches to fill ALL remaining space, renders markdown)
+        # Explanation (stretches to fill remaining space, renders markdown)
         explain_header = QHBoxLayout()
         explain_header.addWidget(self._section_label("Explanation"))
-        self._explain_btn = self._small_btn("Explain")
+        self._explain_btn = self._small_btn("Explain", max_width=90)
         self._explain_btn.clicked.connect(self.explain_clicked.emit)
+        self._explain_btn.setIcon(_create_text_icon("?", 20, "#d4d4d4"))
+        self._explain_btn.setIconSize(QSize(20, 20))
         explain_header.addWidget(self._explain_btn)
         explain_header.addStretch()
         content_layout.addLayout(explain_header)
 
         self._explain_display = self._create_markdown_display()
-        # Always visible so it always occupies remaining space
-        content_layout.addWidget(self._explain_display, 1)  # stretch factor 1
+        content_layout.addWidget(self._explain_display, 1)
 
         # Status label
         self._status_label = QLabel("Ready")
         self._status_label.setStyleSheet("""
             QLabel {
-                color: #888888; font-size: 11px;
+                color: #a0a0a0; font-size: 11px;
                 padding: 2px 8px;
-                background-color: #252526;
+                background-color: #2d2d2d;
                 border-radius: 4px;
             }
         """)
@@ -223,24 +267,31 @@ class AnnotationDetailView(QWidget):
         # TTS player controls
         tts_layout = QHBoxLayout()
         tts_layout.setSpacing(4)
+        tts_layout.setAlignment(Qt.AlignLeft)
 
-        self._tts_btn = QPushButton("🔊 TTS")
+        self._tts_btn = QPushButton("TTS")
         self._tts_btn.setFixedWidth(60)
         self._tts_btn.setStyleSheet(self._btn_style("primary"))
         self._tts_btn.clicked.connect(self.tts_clicked.emit)
+        self._tts_btn.setIcon(_create_text_icon("🔊", 20, "#ffffff"))
+        self._tts_btn.setIconSize(QSize(20, 20))
         tts_layout.addWidget(self._tts_btn)
 
-        self._tts_play_btn = QPushButton("▶")
-        self._tts_play_btn.setFixedWidth(28)
+        self._tts_play_btn = QPushButton("")
+        self._tts_play_btn.setFixedWidth(32)
         self._tts_play_btn.setStyleSheet(self._btn_style("secondary"))
         self._tts_play_btn.clicked.connect(self.tts_play_clicked.emit)
+        self._tts_play_btn.setIcon(_create_text_icon("▶", 20, "#d4d4d4"))
+        self._tts_play_btn.setIconSize(QSize(20, 20))
         self._tts_play_btn.hide()
         tts_layout.addWidget(self._tts_play_btn)
 
-        self._tts_stop_btn = QPushButton("⏹")
-        self._tts_stop_btn.setFixedWidth(28)
+        self._tts_stop_btn = QPushButton("")
+        self._tts_stop_btn.setFixedWidth(32)
         self._tts_stop_btn.setStyleSheet(self._btn_style("secondary"))
         self._tts_stop_btn.clicked.connect(self.tts_stop_clicked.emit)
+        self._tts_stop_btn.setIcon(_create_text_icon("⏸", 20, "#d4d4d4"))
+        self._tts_stop_btn.setIconSize(QSize(20, 20))
         self._tts_stop_btn.hide()
         tts_layout.addWidget(self._tts_stop_btn)
 
@@ -250,45 +301,36 @@ class AnnotationDetailView(QWidget):
         self._tts_progress.setStyleSheet("""
             QProgressBar {
                 background-color: #1e1e1e;
-                border: 1px solid #444444;
+                border: 1px solid #3c3c3c;
                 border-radius: 4px;
             }
             QProgressBar::chunk {
-                background-color: #0078d4;
+                background-color: #0e639c;
                 border-radius: 3px;
             }
         """)
+        # self._tts_progress.setFixedWidth(170)
         self._tts_progress.hide()
-        tts_layout.addWidget(self._tts_progress, 1)
+        tts_layout.addWidget(self._tts_progress)
 
         # TTS settings button
-        self._tts_settings_btn = QPushButton("⚙")
-        self._tts_settings_btn.setFixedWidth(28)
+        self._tts_settings_btn = QPushButton("")
+        self._tts_settings_btn.setFixedWidth(32)
         self._tts_settings_btn.setToolTip("TTS Settings")
         self._tts_settings_btn.setStyleSheet(self._btn_style("secondary"))
         self._tts_settings_btn.clicked.connect(self.tts_settings_clicked.emit)
+        self._tts_settings_btn.setIcon(_create_text_icon("⚙", 20, "#d4d4d4"))
+        self._tts_settings_btn.setIconSize(QSize(20, 20))
         tts_layout.addWidget(self._tts_settings_btn)
 
         content_layout.addLayout(tts_layout)
-
-        # Regenerate button
-        regen_layout = QHBoxLayout()
-        regen_layout.setSpacing(6)
-
-        self._regenerate_btn = QPushButton("🔄 Regenerate")
-        self._regenerate_btn.setStyleSheet(self._btn_style("secondary"))
-        self._regenerate_btn.clicked.connect(self.regenerate_clicked.emit)
-        regen_layout.addWidget(self._regenerate_btn)
-
-        regen_layout.addStretch()
-        content_layout.addLayout(regen_layout)
 
         layout.addWidget(self._content_widget, 1)
 
         # Empty state
         self._empty_label = QLabel("Select an annotation to view details")
         self._empty_label.setAlignment(Qt.AlignCenter)
-        self._empty_label.setStyleSheet("color: #666666; padding: 20px;")
+        self._empty_label.setStyleSheet("color: #7f7f7f; padding: 20px;")
         layout.addWidget(self._empty_label)
 
         # Initially show empty state
@@ -297,7 +339,7 @@ class AnnotationDetailView(QWidget):
     def _section_label(self, text: str) -> QLabel:
         label = QLabel(text)
         label.setFont(QFont("Segoe UI", 9, QFont.Bold))
-        label.setStyleSheet("color: #888888;")
+        label.setStyleSheet("color: #a0a0a0;")
         return label
 
     def _small_btn(self, text: str, max_width: int = 70) -> QPushButton:
@@ -310,20 +352,20 @@ class AnnotationDetailView(QWidget):
         if style_type == "primary":
             return """
                 QPushButton {
-                    background-color: #0078d4; color: white;
+                    background-color: #0e639c; color: white;
                     border-radius: 4px; padding: 5px 10px; border: none; font-size: 12px;
                 }
-                QPushButton:hover { background-color: #1084d8; }
-                QPushButton:disabled { background-color: #555555; color: #888888; }
+                QPushButton:hover { background-color: #1177bb; }
+                QPushButton:disabled { background-color: #2d2d2d; color: #7f7f7f; }
             """
         return """
             QPushButton {
-                background-color: #3c3c3c; color: #e0e0e0;
+                background-color: #3c3c3c; color: #d4d4d4;
                 border-radius: 4px; padding: 5px 10px;
-                border: 1px solid #555555; font-size: 12px;
+                border: 1px solid #3f3f46; font-size: 12px;
             }
-            QPushButton:hover { background-color: #4a4a4a; }
-            QPushButton:disabled { background-color: #2d2d2d; color: #666666; }
+            QPushButton:hover { background-color: #414141; }
+            QPushButton:disabled { background-color: #2d2d2d; color: #7f7f7f; }
         """
 
     def _create_text_display(self, max_height: int) -> QTextEdit:
@@ -333,11 +375,11 @@ class AnnotationDetailView(QWidget):
         display.setStyleSheet("""
             QTextEdit {
                 background-color: #1e1e1e;
-                border: 1px solid #444444;
+                border: 1px solid #3c3c3c;
                 border-radius: 4px;
                 padding: 6px;
                 font-size: 12px;
-                color: #e0e0e0;
+                color: #d4d4d4;
             }
         """)
         return display
@@ -349,11 +391,11 @@ class AnnotationDetailView(QWidget):
         display.setStyleSheet("""
             QTextEdit {
                 background-color: #1e1e1e;
-                border: 1px solid #444444;
+                border: 1px solid #3c3c3c;
                 border-radius: 4px;
                 padding: 8px;
                 font-size: 12px;
-                color: #e0e0e0;
+                color: #d4d4d4;
             }
         """)
         display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -361,13 +403,11 @@ class AnnotationDetailView(QWidget):
 
     def _copy_text(self, text_type: str):
         clipboard = QApplication.clipboard()
-        if text_type == 'corrected':
+        if text_type == "corrected":
             clipboard.setText(self._corrected_text)
-        elif text_type == 'translated':
+        elif text_type == "translated":
             clipboard.setText(self._translated_text)
         self.copy_clicked.emit(text_type)
-
-    # ─── Public API ───────────────────────────────────────────────────────
 
     @property
     def current_annotation_id(self) -> str:
@@ -442,7 +482,6 @@ class AnnotationDetailView(QWidget):
         self._retranslate_btn.setEnabled(not processing)
         self._explain_btn.setEnabled(not processing)
         self._tts_btn.setEnabled(not processing)
-        self._regenerate_btn.setEnabled(not processing)
 
     def start_correction(self):
         self._corrected_display.setPlainText("Correcting...")
@@ -482,8 +521,6 @@ class AnnotationDetailView(QWidget):
         self.reset_tts_player()
         self.set_status("Ready")
 
-    # ─── TTS Player UI ───────────────────────────────────────────────────
-
     def show_tts_generating(self):
         """Show TTS generating state."""
         self._tts_btn.setEnabled(False)
@@ -499,7 +536,9 @@ class AnnotationDetailView(QWidget):
         self._tts_progress.setRange(0, max(1, duration_seconds))
         self._tts_progress.setValue(0)
         self._tts_play_btn.show()
-        self._tts_play_btn.setText("⏸")  # Start playing immediately
+        # self._tts_play_btn.setText("Play")
+        self._tts_play_btn.setIcon(_create_text_icon("▶", 20, "#d4d4d4"))
+        self._tts_play_btn.setIconSize(QSize(20, 20))
         self._tts_stop_btn.show()
 
     def update_tts_progress(self, value: int, maximum: int = -1):
@@ -522,8 +561,6 @@ class AnnotationDetailView(QWidget):
         self._tts_stop_btn.hide()
 
 
-# ─── Annotation Panel ─────────────────────────────────────────────────────────
-
 class AnnotationPanel(QWidget):
     """Panel with annotation list and embedded AI results detail view."""
 
@@ -538,7 +575,6 @@ class AnnotationPanel(QWidget):
     tts_play_clicked = Signal()
     tts_stop_clicked = Signal()
     tts_settings_clicked = Signal()
-    regenerate_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -560,11 +596,11 @@ class AnnotationPanel(QWidget):
 
         title = QLabel("Annotations")
         title.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        title.setStyleSheet("color: #ffffff;")
+        title.setStyleSheet("color: #d4d4d4;")
         header_layout.addWidget(title)
 
         self._count_label = QLabel("0")
-        self._count_label.setStyleSheet("color: #888888;")
+        self._count_label.setStyleSheet("color: #a0a0a0;")
         header_layout.addWidget(self._count_label)
         header_layout.addStretch()
 
@@ -575,7 +611,7 @@ class AnnotationPanel(QWidget):
         splitter.setStyleSheet(
             "QSplitter::handle { background-color: #333333; height: 2px; }")
 
-        # ─── Annotation list ──────────────────────
+        # Annotation list
         list_widget = QWidget()
         list_layout = QVBoxLayout(list_widget)
         list_layout.setContentsMargins(0, 0, 0, 0)
@@ -590,7 +626,10 @@ class AnnotationPanel(QWidget):
                 background-color: #2d2d2d; width: 8px;
             }
             QScrollBar::handle:vertical {
-                background-color: #5a5a5a; border-radius: 4px;
+                background-color: #4f4f4f; border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #5a5a5a;
             }
         """)
 
@@ -604,14 +643,14 @@ class AnnotationPanel(QWidget):
         list_layout.addWidget(scroll)
 
         self._empty_label = QLabel(
-            "No annotations yet.\nSelect text and click Mark to create one.")
+            "No annotations yet.\nSelect text and use Mark Selection to create one.")
         self._empty_label.setAlignment(Qt.AlignCenter)
-        self._empty_label.setStyleSheet("color: #999999; padding: 20px;")
+        self._empty_label.setStyleSheet("color: #7f7f7f; padding: 20px;")
         self._container_layout.insertWidget(0, self._empty_label)
 
         splitter.addWidget(list_widget)
 
-        # ─── Detail view ──────────────────────────
+        # Detail view
         self._detail_view = AnnotationDetailView()
         self._detail_view.copy_clicked.connect(self.copy_clicked.emit)
         self._detail_view.retranslate_clicked.connect(
@@ -622,8 +661,6 @@ class AnnotationPanel(QWidget):
         self._detail_view.tts_stop_clicked.connect(self.tts_stop_clicked.emit)
         self._detail_view.tts_settings_clicked.connect(
             self.tts_settings_clicked.emit)
-        self._detail_view.regenerate_clicked.connect(
-            self.regenerate_clicked.emit)
         splitter.addWidget(self._detail_view)
 
         splitter.setSizes([200, 400])

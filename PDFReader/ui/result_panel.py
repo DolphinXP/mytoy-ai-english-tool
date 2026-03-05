@@ -1,62 +1,49 @@
 """
 Result panel for displaying AI processing results with streaming support.
-Adapted from parent's popup_window.py for PDFReader integration.
 """
-import sys
-from pathlib import Path
-from typing import Optional
-
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QFrame, QScrollArea
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
-# Add parent directory for shared imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# Import from parent project (path added above)
-try:
-    from ui.styles.theme import Theme
-    from ui.styles.icons import get_icon_manager
-except ImportError:
-    # Fallback: create minimal dark Theme if parent not available
-    class Theme:
-        class Colors:
-            BG_PRIMARY = "#2d2d2d"
-            BG_SECONDARY = "#1e1e1e"
-            TEXT_PRIMARY = "#ffffff"
-            TEXT_SECONDARY = "#888888"
+class PdfTheme:
+    class Colors:
+        BG_PRIMARY = "#252526"
+        BG_SECONDARY = "#1e1e1e"
+        BORDER = "#3c3c3c"
+        TEXT_PRIMARY = "#d4d4d4"
+        TEXT_SECONDARY = "#a0a0a0"
+        ACCENT = "#0e639c"
+        ACCENT_HOVER = "#1177bb"
 
-        @staticmethod
-        def button_style(style_type="primary"):
-            if style_type == "primary":
-                return """
-                    QPushButton {
-                        background-color: #0078d4;
-                        color: white;
-                        border-radius: 4px;
-                        padding: 6px 12px;
-                        border: none;
-                    }
-                    QPushButton:hover { background-color: #1084d8; }
-                    QPushButton:disabled { background-color: #555555; color: #888888; }
-                """
+    @staticmethod
+    def button_style(style_type="primary"):
+        if style_type == "primary":
             return """
                 QPushButton {
-                    background-color: #3c3c3c;
-                    color: #e0e0e0;
+                    background-color: #0e639c;
+                    color: white;
                     border-radius: 4px;
                     padding: 6px 12px;
-                    border: 1px solid #555555;
+                    border: none;
                 }
-                QPushButton:hover { background-color: #4a4a4a; }
-                QPushButton:disabled { background-color: #2d2d2d; color: #666666; }
+                QPushButton:hover { background-color: #1177bb; }
+                QPushButton:disabled { background-color: #2d2d2d; color: #7f7f7f; }
             """
-
-    def get_icon_manager():
-        return None
+        return """
+            QPushButton {
+                background-color: #3c3c3c;
+                color: #d4d4d4;
+                border-radius: 4px;
+                padding: 6px 12px;
+                border: 1px solid #3f3f46;
+            }
+            QPushButton:hover { background-color: #414141; }
+            QPushButton:disabled { background-color: #2d2d2d; color: #7f7f7f; }
+        """
 
 
 class ResultPanel(QFrame):
@@ -78,12 +65,6 @@ class ResultPanel(QFrame):
         self._translated_text = ""
         self._explanation = ""
         self._is_processing = False
-
-        try:
-            self._icon_mgr = get_icon_manager()
-        except Exception:
-            self._icon_mgr = None
-
         self._setup_ui()
 
     def _setup_ui(self):
@@ -91,8 +72,8 @@ class ResultPanel(QFrame):
         self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
         self.setStyleSheet(f"""
             ResultPanel {{
-                background-color: {Theme.Colors.BG_PRIMARY};
-                border: 1px solid #444444;
+                background-color: {PdfTheme.Colors.BG_PRIMARY};
+                border: 1px solid {PdfTheme.Colors.BORDER};
                 border-radius: 8px;
             }}
         """)
@@ -105,15 +86,15 @@ class ResultPanel(QFrame):
         header = QHBoxLayout()
         title = QLabel("AI Results")
         title.setFont(QFont("Segoe UI", 12, QFont.Bold))
-        title.setStyleSheet(f"color: {Theme.Colors.TEXT_PRIMARY};")
+        title.setStyleSheet(f"color: {PdfTheme.Colors.TEXT_PRIMARY};")
         header.addWidget(title)
         header.addStretch()
 
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton("X")
         close_btn.setFixedSize(24, 24)
         close_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: none; font-size: 14px; color: #ffffff; }
-            QPushButton:hover { background-color: #4a4a4a; border-radius: 12px; }
+            QPushButton { background: transparent; border: none; font-size: 12px; color: #a0a0a0; }
+            QPushButton:hover { background-color: #333333; border-radius: 12px; color: #ffffff; }
         """)
         close_btn.clicked.connect(self.close_clicked.emit)
         header.addWidget(close_btn)
@@ -139,7 +120,7 @@ class ResultPanel(QFrame):
         corrected_header = QHBoxLayout()
         corrected_header.addWidget(self._section_label("Corrected Text"))
         self._copy_corrected_btn = self._small_btn("Copy")
-        self._copy_corrected_btn.clicked.connect(lambda: self.copy_clicked.emit('corrected'))
+        self._copy_corrected_btn.clicked.connect(lambda: self.copy_clicked.emit("corrected"))
         corrected_header.addWidget(self._copy_corrected_btn)
         corrected_header.addStretch()
         content_layout.addLayout(corrected_header)
@@ -151,7 +132,7 @@ class ResultPanel(QFrame):
         trans_header = QHBoxLayout()
         trans_header.addWidget(self._section_label("Translation"))
         self._copy_trans_btn = self._small_btn("Copy")
-        self._copy_trans_btn.clicked.connect(lambda: self.copy_clicked.emit('translated'))
+        self._copy_trans_btn.clicked.connect(lambda: self.copy_clicked.emit("translated"))
         trans_header.addWidget(self._copy_trans_btn)
         self._retranslate_btn = self._small_btn("Retranslate")
         self._retranslate_btn.clicked.connect(self.retranslate_clicked.emit)
@@ -183,10 +164,10 @@ class ResultPanel(QFrame):
         self._status_label = QLabel("Ready")
         self._status_label.setStyleSheet(f"""
             QLabel {{
-                color: {Theme.Colors.TEXT_SECONDARY};
+                color: {PdfTheme.Colors.TEXT_SECONDARY};
                 font-size: 11px;
                 padding: 4px 8px;
-                background-color: {Theme.Colors.BG_SECONDARY};
+                background-color: {PdfTheme.Colors.BG_SECONDARY};
                 border-radius: 4px;
             }}
         """)
@@ -196,13 +177,13 @@ class ResultPanel(QFrame):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(8)
 
-        self._tts_btn = QPushButton("🔊 Play TTS")
-        self._tts_btn.setStyleSheet(Theme.button_style("primary"))
+        self._tts_btn = QPushButton("Play TTS")
+        self._tts_btn.setStyleSheet(PdfTheme.button_style("primary"))
         self._tts_btn.clicked.connect(self.tts_clicked.emit)
         btn_layout.addWidget(self._tts_btn)
 
-        self._regenerate_btn = QPushButton("🔄 Regenerate")
-        self._regenerate_btn.setStyleSheet(Theme.button_style("secondary"))
+        self._regenerate_btn = QPushButton("Regenerate")
+        self._regenerate_btn.setStyleSheet(PdfTheme.button_style("secondary"))
         self._regenerate_btn.clicked.connect(self.regenerate_clicked.emit)
         btn_layout.addWidget(self._regenerate_btn)
 
@@ -213,14 +194,14 @@ class ResultPanel(QFrame):
         """Create a section label."""
         label = QLabel(text)
         label.setFont(QFont("Segoe UI", 10, QFont.Bold))
-        label.setStyleSheet(f"color: {Theme.Colors.TEXT_SECONDARY};")
+        label.setStyleSheet(f"color: {PdfTheme.Colors.TEXT_SECONDARY};")
         return label
 
     def _small_btn(self, text: str) -> QPushButton:
         """Create a small button."""
         btn = QPushButton(text)
-        btn.setMaximumWidth(80)
-        btn.setStyleSheet(Theme.button_style("secondary"))
+        btn.setMaximumWidth(90)
+        btn.setStyleSheet(PdfTheme.button_style("secondary"))
         return btn
 
     def _create_text_display(self, max_height: int) -> QTextEdit:
@@ -230,17 +211,16 @@ class ResultPanel(QFrame):
         display.setMaximumHeight(max_height)
         display.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {Theme.Colors.BG_SECONDARY};
-                border: 1px solid #444444;
+                background-color: {PdfTheme.Colors.BG_SECONDARY};
+                border: 1px solid {PdfTheme.Colors.BORDER};
                 border-radius: 4px;
                 padding: 8px;
                 font-size: 12px;
-                color: #e0e0e0;
+                color: {PdfTheme.Colors.TEXT_PRIMARY};
             }}
         """)
         return display
 
-    # Public API
     def set_original_text(self, text: str):
         """Set original selected text."""
         self._selected_text = text

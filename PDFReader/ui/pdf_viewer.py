@@ -317,13 +317,13 @@ class PDFPageWidget(QWidget):
 
         # Draw external text highlights (e.g., search results)
         if self._external_text_rects:
-            ext_color = QColor(0, 120, 215, 80)
+            ext_color = QColor(14, 99, 156, 80)
             for qrect in self._external_text_rects:
                 painter.fillRect(qrect, ext_color)
 
         # Draw text-flow selection highlights (per-line rects)
         if self._selection_rects:
-            sel_color = QColor(0, 120, 215, 80)
+            sel_color = QColor(14, 99, 156, 80)
             for qrect in self._selection_rects:
                 painter.fillRect(qrect, sel_color)
 
@@ -361,12 +361,12 @@ class PDFViewerWidget(QScrollArea):
                 border: none;
             }
             QScrollBar::handle:vertical {
-                background-color: #5a5a5a;
+                background-color: #4f4f4f;
                 border-radius: 6px;
                 min-height: 20px;
             }
             QScrollBar::handle:vertical:hover {
-                background-color: #6a6a6a;
+                background-color: #5a5a5a;
             }
             QScrollBar:horizontal {
                 background-color: #2d2d2d;
@@ -374,7 +374,7 @@ class PDFViewerWidget(QScrollArea):
                 border: none;
             }
             QScrollBar::handle:horizontal {
-                background-color: #5a5a5a;
+                background-color: #4f4f4f;
                 border-radius: 6px;
                 min-width: 20px;
             }

@@ -17,22 +17,23 @@ class StatusBarWidget(QWidget):
         """Set up the status bar UI."""
         self.setStyleSheet("""
             QWidget {
-                background-color: #007acc;
-                border-top: 1px solid #005a9e;
+                background-color: #252526;
+                border-top: 1px solid #333333;
             }
             QLabel {
                 background: transparent;
                 border: none;
-                color: #ffffff;
+                color: #d4d4d4;
                 font-size: 11px;
             }
             QProgressBar {
-                background-color: #005a9e;
-                border: none;
+                background-color: #1e1e1e;
+                border: 1px solid #3c3c3c;
                 border-radius: 2px;
+                color: #d4d4d4;
             }
             QProgressBar::chunk {
-                background-color: #ffffff;
+                background-color: #0e639c;
                 border-radius: 2px;
             }
         """)

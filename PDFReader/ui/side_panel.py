@@ -2,9 +2,48 @@
 from typing import List
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem
+    QListWidget, QListWidgetItem, QStyle
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
+
+
+def _create_text_icon(text: str, size: int = 20, color: str = "#d4d4d4") -> QIcon:
+    """Create an icon from text/symbol."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+    
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.TextAntialiasing)
+    
+    # Use a clear, readable font
+    font = QFont("Segoe UI Symbol", int(size * 0.7))
+    painter.setFont(font)
+    painter.setPen(QColor(color))
+    
+    # Center the text
+    painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
+    painter.end()
+    
+    return QIcon(pixmap)
+
+
+def _light_icon(widget: QWidget, standard_pixmap: QStyle.StandardPixmap, size: int = 18) -> QIcon:
+    """Create a light-tinted icon from Qt standard pixmaps for dark theme."""
+    # Try to get the standard icon directly - it may already be styled correctly
+    icon = widget.style().standardIcon(standard_pixmap)
+    if not icon.isNull():
+        return icon
+    
+    # Fallback: get pixmap and try to tint it
+    source = widget.style().standardPixmap(standard_pixmap)
+    if source.isNull():
+        return QIcon()
+
+    # Scale to desired size
+    scaled = source.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    return QIcon(scaled)
 
 
 class BookmarkPanel(QWidget):
@@ -26,7 +65,7 @@ class BookmarkPanel(QWidget):
             QListWidget {
                 background-color: #1e1e1e;
                 border: none;
-                color: #ffffff;
+                color: #d4d4d4;
                 font-size: 12px;
             }
             QListWidget::item {
@@ -34,10 +73,10 @@ class BookmarkPanel(QWidget):
                 border-bottom: 1px solid #333333;
             }
             QListWidget::item:hover {
-                background-color: #2d2d2d;
+                background-color: #2a2d2e;
             }
             QListWidget::item:selected {
-                background-color: #0078d4;
+                background-color: #0e639c;
             }
         """)
         self._list.itemClicked.connect(self._on_item_clicked)
@@ -45,7 +84,7 @@ class BookmarkPanel(QWidget):
 
         self._empty_label = QLabel("No bookmarks in this PDF")
         self._empty_label.setAlignment(Qt.AlignCenter)
-        self._empty_label.setStyleSheet("color: #888888; padding: 20px;")
+        self._empty_label.setStyleSheet("color: #7f7f7f; padding: 20px;")
         layout.addWidget(self._empty_label)
 
     def set_bookmarks(self, bookmarks: List[tuple]):
@@ -94,17 +133,20 @@ class SidePanel(QWidget):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(8, 4, 8, 4)
 
-        self._collapse_btn = QPushButton("◀")
-        self._collapse_btn.setFixedSize(24, 24)
+        self._collapse_btn = QPushButton("Hide")
+        self._collapse_btn.setFixedSize(76, 24)
+        self._collapse_btn.setToolTip("Hide bookmarks panel")
+        self._collapse_btn.setIcon(_create_text_icon("◀", 20, "#d4d4d4"))
+        self._collapse_btn.setIconSize(QSize(20, 20))
         self._collapse_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 border: none;
-                color: #cccccc;
+                color: #d4d4d4;
                 font-size: 12px;
             }
             QPushButton:hover {
-                background-color: #3c3c3c;
+                background-color: #333333;
                 border-radius: 4px;
             }
         """)
@@ -125,11 +167,15 @@ class SidePanel(QWidget):
         self._collapsed = not self._collapsed
         if self._collapsed:
             self._bookmark_panel.hide()
-            self._collapse_btn.setText("▶")
-            self.setFixedWidth(40)
+            self._collapse_btn.setText("Show")
+            self._collapse_btn.setToolTip("Show bookmarks panel")
+            self._collapse_btn.setIcon(_create_text_icon("▶", 20, "#d4d4d4"))
+            self.setFixedWidth(72)
         else:
             self._bookmark_panel.show()
-            self._collapse_btn.setText("◀")
+            self._collapse_btn.setText("Hide")
+            self._collapse_btn.setToolTip("Hide bookmarks panel")
+            self._collapse_btn.setIcon(_create_text_icon("◀", 20, "#d4d4d4"))
             self.setMinimumWidth(160)
             self.setMaximumWidth(500)
         self.collapse_toggled.emit(self._collapsed)

@@ -3,10 +3,31 @@ Toolbar widget for PDFReader.
 """
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QPushButton, QLabel, QSpinBox,
-    QComboBox, QToolButton, QSizePolicy, QMenu
+    QComboBox, QToolButton, QMenu, QStyle
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon, QFont
+from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QFontMetrics
+
+
+def _create_text_icon(text: str, size: int = 20, color: str = "#d4d4d4") -> QIcon:
+    """Create an icon from text/symbol."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+    
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.TextAntialiasing)
+    
+    # Use a clear, readable font
+    font = QFont("Segoe UI Symbol", int(size * 0.7))
+    painter.setFont(font)
+    painter.setPen(QColor(color))
+    
+    # Center the text
+    painter.drawText(pixmap.rect(), Qt.AlignCenter, text)
+    painter.end()
+    
+    return QIcon(pixmap)
 
 
 class ToolbarWidget(QWidget):
@@ -25,6 +46,7 @@ class ToolbarWidget(QWidget):
     zoom_fit_width_clicked = Signal()
     zoom_fit_window_clicked = Signal()
     zoom_level_changed = Signal(float)
+    regenerate_clicked = Signal()
     toggle_annotations_clicked = Signal()
 
     def __init__(self, parent=None):
@@ -44,44 +66,44 @@ class ToolbarWidget(QWidget):
                 background-color: transparent;
                 border: 1px solid transparent;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 5px 10px;
                 font-size: 13px;
-                color: #cccccc;
+                color: #d4d4d4;
             }
             QPushButton:hover, QToolButton:hover {
-                background-color: #3c3c3c;
-                border-color: #555555;
+                background-color: #333333;
+                border-color: #3c3c3c;
             }
             QPushButton:pressed, QToolButton:pressed {
-                background-color: #4a4a4a;
+                background-color: #2a2d2e;
             }
             QPushButton:disabled, QToolButton:disabled {
-                color: #666666;
+                color: #6b6b6b;
             }
             QSpinBox {
                 background-color: #3c3c3c;
-                border: 1px solid #555555;
+                border: 1px solid #3f3f46;
                 border-radius: 4px;
-                color: #ffffff;
+                color: #d4d4d4;
                 padding: 2px;
             }
             QComboBox {
                 background-color: #3c3c3c;
-                border: 1px solid #555555;
+                border: 1px solid #3f3f46;
                 border-radius: 4px;
-                color: #ffffff;
+                color: #d4d4d4;
                 padding: 4px;
             }
             QComboBox::drop-down {
                 border: none;
             }
             QComboBox QAbstractItemView {
-                background-color: #2d2d2d;
-                color: #ffffff;
-                selection-background-color: #0078d4;
+                background-color: #252526;
+                color: #d4d4d4;
+                selection-background-color: #0e639c;
             }
             QLabel {
-                color: #cccccc;
+                color: #a0a0a0;
             }
         """)
 
@@ -97,24 +119,30 @@ class ToolbarWidget(QWidget):
         layout.addWidget(self._file_menu_btn)
 
         # Open file button
-        self._open_btn = QPushButton("📂 Open")
+        self._open_btn = QPushButton("Open PDF")
         self._open_btn.setToolTip("Open PDF file (Ctrl+O)")
         self._open_btn.clicked.connect(self.open_file_clicked.emit)
+        self._open_btn.setIcon(_create_text_icon("📁", 24))
+        self._open_btn.setIconSize(QSize(24, 24))
         layout.addWidget(self._open_btn)
 
         layout.addSpacing(16)
 
         # Navigation buttons
-        self._first_btn = QPushButton("⏮")
+        self._first_btn = QPushButton("First")
         self._first_btn.setToolTip("First page (Home)")
-        self._first_btn.setFixedWidth(36)
+        self._first_btn.setMinimumWidth(72)
         self._first_btn.clicked.connect(self.first_page_clicked.emit)
+        self._first_btn.setIcon(_create_text_icon("⏮", 22))
+        self._first_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._first_btn)
 
-        self._prev_btn = QPushButton("◀")
-        self._prev_btn.setToolTip("Previous page (←)")
-        self._prev_btn.setFixedWidth(36)
+        self._prev_btn = QPushButton("Prev")
+        self._prev_btn.setToolTip("Previous page (Left Arrow)")
+        self._prev_btn.setMinimumWidth(72)
         self._prev_btn.clicked.connect(self.prev_page_clicked.emit)
+        self._prev_btn.setIcon(_create_text_icon("◀", 22))
+        self._prev_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._prev_btn)
 
         # Page number input
@@ -133,25 +161,31 @@ class ToolbarWidget(QWidget):
             "background: transparent; border: none;")
         layout.addWidget(self._page_count_label)
 
-        self._next_btn = QPushButton("▶")
-        self._next_btn.setToolTip("Next page (→)")
-        self._next_btn.setFixedWidth(36)
+        self._next_btn = QPushButton("Next")
+        self._next_btn.setToolTip("Next page (Right Arrow)")
+        self._next_btn.setMinimumWidth(72)
         self._next_btn.clicked.connect(self.next_page_clicked.emit)
+        self._next_btn.setIcon(_create_text_icon("▶", 22))
+        self._next_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._next_btn)
 
-        self._last_btn = QPushButton("⏭")
+        self._last_btn = QPushButton("Last")
         self._last_btn.setToolTip("Last page (End)")
-        self._last_btn.setFixedWidth(36)
+        self._last_btn.setMinimumWidth(72)
         self._last_btn.clicked.connect(self.last_page_clicked.emit)
+        self._last_btn.setIcon(_create_text_icon("⏭", 22))
+        self._last_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._last_btn)
 
         layout.addSpacing(16)
 
         # Zoom controls
-        self._zoom_out_btn = QPushButton("−")
+        self._zoom_out_btn = QPushButton("Out")
         self._zoom_out_btn.setToolTip("Zoom out (Ctrl+-)")
-        self._zoom_out_btn.setFixedWidth(36)
+        self._zoom_out_btn.setMinimumWidth(68)
         self._zoom_out_btn.clicked.connect(self.zoom_out_clicked.emit)
+        self._zoom_out_btn.setIcon(_create_text_icon("−", 22))
+        self._zoom_out_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._zoom_out_btn)
 
         self._zoom_combo = QComboBox()
@@ -163,34 +197,51 @@ class ToolbarWidget(QWidget):
         self._zoom_combo.currentTextChanged.connect(self._on_zoom_text_changed)
         layout.addWidget(self._zoom_combo)
 
-        self._zoom_in_btn = QPushButton("+")
+        self._zoom_in_btn = QPushButton("In")
         self._zoom_in_btn.setToolTip("Zoom in (Ctrl++)")
-        self._zoom_in_btn.setFixedWidth(36)
+        self._zoom_in_btn.setMinimumWidth(68)
         self._zoom_in_btn.clicked.connect(self.zoom_in_clicked.emit)
+        self._zoom_in_btn.setIcon(_create_text_icon("+", 22))
+        self._zoom_in_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._zoom_in_btn)
 
-        self._zoom_reset_btn = QPushButton("Reset")
+        self._zoom_reset_btn = QPushButton("Reset Zoom")
         self._zoom_reset_btn.setToolTip("Reset zoom (Ctrl+0)")
         self._zoom_reset_btn.clicked.connect(self.zoom_reset_clicked.emit)
+        self._zoom_reset_btn.setIcon(_create_text_icon("⟲", 22))
+        self._zoom_reset_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._zoom_reset_btn)
 
-        self._fit_width_btn = QPushButton("↔ Width")
+        self._fit_width_btn = QPushButton("Fit Width")
         self._fit_width_btn.setToolTip("Fit page width to viewer")
         self._fit_width_btn.clicked.connect(self.zoom_fit_width_clicked.emit)
+        self._fit_width_btn.setIcon(_create_text_icon("↔", 22))
+        self._fit_width_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._fit_width_btn)
 
-        self._fit_window_btn = QPushButton("⬜ Page")
+        self._fit_window_btn = QPushButton("Fit Page")
         self._fit_window_btn.setToolTip("Fit entire page in viewer")
         self._fit_window_btn.clicked.connect(self.zoom_fit_window_clicked.emit)
+        self._fit_window_btn.setIcon(_create_text_icon("⛶", 22))
+        self._fit_window_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._fit_window_btn)
 
         layout.addStretch()
 
+        self._regenerate_btn = QPushButton("Regenerate")
+        self._regenerate_btn.setToolTip("Regenerate AI results for selected annotation")
+        self._regenerate_btn.setIcon(_create_text_icon("↻", 22))
+        self._regenerate_btn.setIconSize(QSize(22, 22))
+        self._regenerate_btn.clicked.connect(self.regenerate_clicked.emit)
+        layout.addWidget(self._regenerate_btn)
+
         # Toggle annotation panel button
-        self._toggle_annotations_btn = QPushButton("📝 Annotations")
+        self._toggle_annotations_btn = QPushButton("Annotations")
         self._toggle_annotations_btn.setToolTip("Toggle annotation panel")
         self._toggle_annotations_btn.setCheckable(True)
         self._toggle_annotations_btn.setChecked(True)
+        self._toggle_annotations_btn.setIcon(_create_text_icon("☰", 22))
+        self._toggle_annotations_btn.setIconSize(QSize(22, 22))
         self._toggle_annotations_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
@@ -198,14 +249,14 @@ class ToolbarWidget(QWidget):
                 border-radius: 4px;
                 padding: 6px 12px;
                 font-size: 13px;
-                color: #cccccc;
+                color: #d4d4d4;
             }
             QPushButton:hover {
-                background-color: #3c3c3c;
-                border-color: #555555;
+                background-color: #333333;
+                border-color: #3c3c3c;
             }
             QPushButton:checked {
-                background-color: #0078d4;
+                background-color: #0e639c;
                 color: #ffffff;
             }
         """)
@@ -267,3 +318,4 @@ class ToolbarWidget(QWidget):
         self._zoom_reset_btn.setEnabled(enabled)
         self._fit_width_btn.setEnabled(enabled)
         self._fit_window_btn.setEnabled(enabled)
+        self._regenerate_btn.setEnabled(enabled)

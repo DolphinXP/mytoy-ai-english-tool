@@ -20,29 +20,31 @@ class TextContextMenu(QObject):
     def _setup_menu(self):
         self._menu.setStyleSheet("""
             QMenu {
-                background-color: #2d2d2d;
-                border: 1px solid #454545;
+                background-color: #252526;
+                border: 1px solid #3c3c3c;
                 border-radius: 4px;
                 padding: 4px 0;
+                color: #d4d4d4;
             }
             QMenu::item {
                 background-color: transparent;
-                color: #ffffff;
+                color: #d4d4d4;
                 padding: 8px 24px;
                 font-size: 13px;
             }
             QMenu::item:selected {
-                background-color: #0078d4;
+                background-color: #0e639c;
+                color: #ffffff;
             }
             QMenu::separator {
                 height: 1px;
-                background-color: #454545;
+                background-color: #3c3c3c;
                 margin: 4px 8px;
             }
         """)
 
         # Mark action - creates annotation with selected text
-        self._mark_action = QAction("📌 Mark", self._menu)
+        self._mark_action = QAction("Mark Selection", self._menu)
         self._mark_action.triggered.connect(self._on_mark)
         self._menu.addAction(self._mark_action)
 
