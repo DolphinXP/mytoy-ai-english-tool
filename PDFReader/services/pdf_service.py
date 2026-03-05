@@ -1,7 +1,7 @@
 """
 PDF document handling service using PyMuPDF.
 """
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Any
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -237,6 +237,31 @@ class PDFService:
             "producer": self._document.metadata.get("producer", ""),
             "page_count": self.page_count,
         }
+
+    def get_text_words(self, page_number: int) -> List[Tuple]:
+        """
+        Get word-level text data with bounding boxes.
+
+        Each word entry is a tuple:
+        (x0, y0, x1, y1, word_text, block_no, line_no, word_no)
+
+        Args:
+            page_number: Page index (0-based)
+
+        Returns:
+            List of word tuples sorted in reading order
+        """
+        page = self.get_page(page_number)
+        if not page:
+            return []
+
+        try:
+            words = page.get_text("words")
+            # Sort by reading order: block, line, word
+            return sorted(words, key=lambda w: (w[5], w[6], w[7]))
+        except Exception as e:
+            print(f"Error getting text words: {e}")
+            return []
 
     def get_bookmarks(self) -> List[Tuple[str, int, int]]:
         """

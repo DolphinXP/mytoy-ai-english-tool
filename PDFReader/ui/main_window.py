@@ -1,4 +1,22 @@
 """Main window for PDFReader application."""
+from core.thread_manager import ThreadManager
+from PDFReader.models.annotation import Annotation
+from PDFReader.core.ai_processor import AIProcessor
+from PDFReader.core.app import PDFReaderApp
+from PDFReader.ui.result_panel import ResultPanel
+from PDFReader.ui.context_menu import TextContextMenu
+from PDFReader.ui.side_panel import SidePanel
+from PDFReader.ui.status_bar import StatusBarWidget
+from PDFReader.ui.annotation_panel import AnnotationPanel
+from PDFReader.ui.pdf_viewer import PDFViewerWidget
+from PDFReader.ui.toolbar import ToolbarWidget
+from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QColor
+from PySide6.QtCore import Qt, QPoint, QTimer
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QSplitter, QFileDialog, QMessageBox, QApplication
+)
+from typing import Optional
 import sys
 from pathlib import Path
 
@@ -6,25 +24,6 @@ _parent_dir = str(Path(__file__).parent.parent.parent)
 if _parent_dir not in sys.path:
     sys.path.insert(0, _parent_dir)
 
-from typing import Optional
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QFileDialog, QMessageBox, QApplication
-)
-from PySide6.QtCore import Qt, QPoint, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QColor
-
-from PDFReader.ui.toolbar import ToolbarWidget
-from PDFReader.ui.pdf_viewer import PDFViewerWidget
-from PDFReader.ui.annotation_panel import AnnotationPanel
-from PDFReader.ui.status_bar import StatusBarWidget
-from PDFReader.ui.side_panel import SidePanel
-from PDFReader.ui.context_menu import TextContextMenu
-from PDFReader.ui.result_panel import ResultPanel
-from PDFReader.core.app import PDFReaderApp
-from PDFReader.core.ai_processor import AIProcessor
-from PDFReader.models.annotation import Annotation
-from core.thread_manager import ThreadManager
 
 DARK_THEME = """
     QMainWindow, QWidget { background-color: #1e1e1e; color: #ffffff; }
@@ -77,10 +76,10 @@ class MainWindow(QMainWindow):
 
         # Splitter for viewer and annotation panel
         splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet("QSplitter::handle { background-color: #333333; width: 2px; }")
+        splitter.setStyleSheet(
+            "QSplitter::handle { background-color: #333333; width: 2px; }")
 
         self._viewer = PDFViewerWidget()
-        self._viewer.set_text_extractor(self._extract_text)
         splitter.addWidget(self._viewer)
 
         self._annotation_panel = AnnotationPanel()
@@ -140,24 +139,27 @@ class MainWindow(QMainWindow):
         self._viewer.page_down_requested.connect(self._app.next_page)
 
         # Annotation panel
-        self._annotation_panel.annotation_selected.connect(self._on_annotation_selected)
-        self._annotation_panel.annotation_deleted.connect(self._on_annotation_delete_requested)
+        self._annotation_panel.annotation_selected.connect(
+            self._on_annotation_selected)
+        self._annotation_panel.annotation_deleted.connect(
+            self._on_annotation_delete_requested)
 
         # Annotation manager
-        self._app.annotation_manager.annotations_loaded.connect(self._on_annotations_loaded)
-        self._app.annotation_manager.annotation_created.connect(self._on_annotation_created)
-        self._app.annotation_manager.annotation_deleted.connect(self._on_annotation_deleted)
+        self._app.annotation_manager.annotations_loaded.connect(
+            self._on_annotations_loaded)
+        self._app.annotation_manager.annotation_created.connect(
+            self._on_annotation_created)
+        self._app.annotation_manager.annotation_deleted.connect(
+            self._on_annotation_deleted)
 
         # Context menu
-        self._context_menu.translate_clicked.connect(self._on_translate_selection)
+        self._context_menu.translate_clicked.connect(
+            self._on_translate_selection)
         self._context_menu.explain_clicked.connect(self._on_explain_selection)
 
         # Side panel
         self._side_panel.bookmark_clicked.connect(self._app.go_to_page)
         self._side_panel.history_clicked.connect(self._on_history_clicked)
-
-    def _extract_text(self, rect: tuple) -> tuple:
-        return self._app.get_text_in_selection(rect)
 
     def _on_open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -189,7 +191,8 @@ class MainWindow(QMainWindow):
         self._update_page_highlights()
         if self._app.is_document_loaded:
             doc_path = self._app.pdf_service.document_path
-            self._side_panel.add_history(doc_path, page, Path(doc_path).stem if doc_path else "Unknown")
+            self._side_panel.add_history(doc_path, page, Path(
+                doc_path).stem if doc_path else "Unknown")
 
     def _on_zoom_changed(self, zoom: float):
         self._toolbar.set_zoom_level(zoom)
@@ -202,11 +205,16 @@ class MainWindow(QMainWindow):
     def _render_current_page(self):
         if not self._app.is_document_loaded:
             return
-        pixmap_data = self._app.pdf_service.get_page_pixmap(self._app.current_page, self._app.zoom_level)
+        pixmap_data = self._app.pdf_service.get_page_pixmap(
+            self._app.current_page, self._app.zoom_level)
         if pixmap_data:
             from PySide6.QtGui import QImage
-            img = QImage(pixmap_data.samples, pixmap_data.width, pixmap_data.height, pixmap_data.stride, QImage.Format_RGB888)
-            self._viewer.display_pixmap(QPixmap.fromImage(img), self._app.zoom_level)
+            img = QImage(pixmap_data.samples, pixmap_data.width,
+                         pixmap_data.height, pixmap_data.stride, QImage.Format_RGB888)
+            words = self._app.pdf_service.get_text_words(
+                self._app.current_page)
+            self._viewer.display_pixmap(
+                QPixmap.fromImage(img), self._app.zoom_level, words)
 
     def _on_selection_made(self, rect: tuple, text: str, text_rects: list):
         if not text:
@@ -215,7 +223,8 @@ class MainWindow(QMainWindow):
         self._current_text_rects = text_rects
         self._current_selected_text = text
         # Show context menu at selection end
-        global_pos = self._viewer.mapToGlobal(QPoint(int(rect[2]), int(rect[3])))
+        global_pos = self._viewer.mapToGlobal(
+            QPoint(int(rect[2]), int(rect[3])))
         self._context_menu.show_at(global_pos, text)
 
     def _clear_selection(self):
@@ -243,7 +252,8 @@ class MainWindow(QMainWindow):
         self._update_annotation_status()
 
     def _update_annotation_status(self):
-        self._status_bar.set_annotation_count(self._app.annotation_manager.get_count())
+        self._status_bar.set_annotation_count(
+            self._app.annotation_manager.get_count())
         self._update_page_highlights()
 
     def _on_annotation_selected(self, annotation_id: str):
@@ -262,7 +272,8 @@ class MainWindow(QMainWindow):
     def _update_page_highlights(self):
         if not self._app.is_document_loaded:
             return
-        annotations = self._app.annotation_manager.get_by_page(self._app.current_page)
+        annotations = self._app.annotation_manager.get_by_page(
+            self._app.current_page)
         highlights = []
         for ann in annotations:
             color = QColor(255, 235, 59)
@@ -305,20 +316,27 @@ class MainWindow(QMainWindow):
         self._result_panel.regenerate_clicked.connect(self._on_regenerate)
         self._result_panel.close_clicked.connect(self._close_result_panel)
         # Connect AI processor signals
-        self._ai_processor.correction_chunk.connect(self._result_panel.append_corrected_chunk)
+        self._ai_processor.correction_chunk.connect(
+            self._result_panel.append_corrected_chunk)
         self._ai_processor.correction_done.connect(self._on_correction_done)
         self._ai_processor.correction_error.connect(self._on_correction_error)
-        self._ai_processor.translation_chunk.connect(self._result_panel.append_translated_chunk)
+        self._ai_processor.translation_chunk.connect(
+            self._result_panel.append_translated_chunk)
         self._ai_processor.translation_done.connect(self._on_translation_done)
-        self._ai_processor.translation_error.connect(self._on_translation_error)
-        self._ai_processor.explain_chunk.connect(self._result_panel.append_explain_chunk)
+        self._ai_processor.translation_error.connect(
+            self._on_translation_error)
+        self._ai_processor.explain_chunk.connect(
+            self._result_panel.append_explain_chunk)
         self._ai_processor.explain_done.connect(self._on_explain_done)
-        self._ai_processor.tts_finished.connect(lambda: self._result_panel.set_status("Ready"))
-        self._ai_processor.tts_error.connect(lambda e: self._result_panel.set_status(f"TTS error: {e}"))
+        self._ai_processor.tts_finished.connect(
+            lambda: self._result_panel.set_status("Ready"))
+        self._ai_processor.tts_error.connect(
+            lambda e: self._result_panel.set_status(f"TTS error: {e}"))
 
     def _position_result_panel(self):
         if hasattr(self, '_result_panel') and self._result_panel:
-            self._result_panel.move(self.width() - self._result_panel.width() - 20, 80)
+            self._result_panel.move(
+                self.width() - self._result_panel.width() - 20, 80)
 
     def _close_result_panel(self):
         if hasattr(self, '_result_panel') and self._result_panel:
@@ -350,7 +368,8 @@ class MainWindow(QMainWindow):
 
     def _on_copy_result(self, text_type: str):
         clipboard = QApplication.clipboard()
-        text = self._result_panel.get_corrected_text() if text_type == 'corrected' else self._result_panel.get_translated_text()
+        text = self._result_panel.get_corrected_text(
+        ) if text_type == 'corrected' else self._result_panel.get_translated_text()
         msg = "Corrected text copied" if text_type == 'corrected' else "Translation copied"
         clipboard.setText(text)
         self._status_bar.set_status(msg)
@@ -364,7 +383,8 @@ class MainWindow(QMainWindow):
     def _on_explain(self):
         if corrected := self._result_panel.get_corrected_text():
             self._result_panel.start_explanation()
-            self._ai_processor.start_explanation(corrected, self._result_panel.get_translated_text())
+            self._ai_processor.start_explanation(
+                corrected, self._result_panel.get_translated_text())
 
     def _on_tts(self):
         if corrected := self._result_panel.get_corrected_text():
