@@ -23,6 +23,7 @@ class AIProcessor(QObject):
     explain_chunk = Signal(str)
     explain_done = Signal(str)
     tts_started = Signal()
+    tts_completed = Signal(str)  # audio file path
     tts_finished = Signal()
     tts_error = Signal(str)
 
@@ -67,10 +68,12 @@ class AIProcessor(QObject):
         self._explain_thread = None  # Allow garbage collection
 
     def start_tts(self, text: str):
-        """Start text-to-speech playback."""
+        """Start text-to-speech generation."""
         try:
             self.tts_started.emit()
             thread = RemoteTTSThread(text)
+            thread.tts_completed.connect(self.tts_completed.emit)
+            thread.tts_error.connect(self.tts_error.emit)
             thread.finished.connect(self.tts_finished.emit)
             self._thread_manager.set_tts_thread(thread)
             thread.start()

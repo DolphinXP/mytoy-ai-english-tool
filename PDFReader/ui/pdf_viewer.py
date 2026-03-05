@@ -414,6 +414,10 @@ class PDFViewerWidget(QScrollArea):
         """Map a position in page widget display coordinates to global screen coordinates."""
         return self._page_widget.mapToGlobal(pos)
 
+    def get_viewport_size(self) -> QSize:
+        """Get the visible viewport size (excluding scrollbars)."""
+        return self.viewport().size()
+
     def wheelEvent(self, event: QWheelEvent):
         """Handle mouse wheel for scrolling, page navigation, and Ctrl+wheel zoom."""
         delta = event.angleDelta().y()

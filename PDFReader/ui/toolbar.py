@@ -22,6 +22,8 @@ class ToolbarWidget(QWidget):
     zoom_in_clicked = Signal()
     zoom_out_clicked = Signal()
     zoom_reset_clicked = Signal()
+    zoom_fit_width_clicked = Signal()
+    zoom_fit_window_clicked = Signal()
     zoom_level_changed = Signal(float)
     toggle_annotations_clicked = Signal()
 
@@ -165,6 +167,16 @@ class ToolbarWidget(QWidget):
         self._zoom_reset_btn.clicked.connect(self.zoom_reset_clicked.emit)
         layout.addWidget(self._zoom_reset_btn)
 
+        self._fit_width_btn = QPushButton("↔ Width")
+        self._fit_width_btn.setToolTip("Fit page width to viewer")
+        self._fit_width_btn.clicked.connect(self.zoom_fit_width_clicked.emit)
+        layout.addWidget(self._fit_width_btn)
+
+        self._fit_window_btn = QPushButton("⬜ Page")
+        self._fit_window_btn.setToolTip("Fit entire page in viewer")
+        self._fit_window_btn.clicked.connect(self.zoom_fit_window_clicked.emit)
+        layout.addWidget(self._fit_window_btn)
+
         layout.addStretch()
 
         # Toggle annotation panel button
@@ -242,3 +254,5 @@ class ToolbarWidget(QWidget):
         self._zoom_out_btn.setEnabled(enabled)
         self._zoom_combo.setEnabled(enabled)
         self._zoom_reset_btn.setEnabled(enabled)
+        self._fit_width_btn.setEnabled(enabled)
+        self._fit_window_btn.setEnabled(enabled)

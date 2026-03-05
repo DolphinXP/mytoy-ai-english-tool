@@ -8,7 +8,7 @@ from typing import Optional, List
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QTextEdit, QSizePolicy, QSplitter,
-    QApplication
+    QApplication, QSlider, QProgressBar
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
@@ -136,6 +136,9 @@ class AnnotationDetailView(QWidget):
     retranslate_clicked = Signal()
     explain_clicked = Signal()
     tts_clicked = Signal()
+    tts_play_clicked = Signal()
+    tts_stop_clicked = Signal()
+    tts_settings_clicked = Signal()
     regenerate_clicked = Signal()
 
     def __init__(self, parent=None):
@@ -183,7 +186,7 @@ class AnnotationDetailView(QWidget):
         self._copy_trans_btn.clicked.connect(
             lambda: self._copy_text('translated'))
         trans_header.addWidget(self._copy_trans_btn)
-        self._retranslate_btn = self._small_btn("Redo")
+        self._retranslate_btn = self._small_btn("Redo Trans")
         self._retranslate_btn.clicked.connect(self.retranslate_clicked.emit)
         trans_header.addWidget(self._retranslate_btn)
         trans_header.addStretch()
@@ -217,22 +220,68 @@ class AnnotationDetailView(QWidget):
         """)
         content_layout.addWidget(self._status_label)
 
-        # Action buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(6)
+        # TTS player controls
+        tts_layout = QHBoxLayout()
+        tts_layout.setSpacing(4)
 
         self._tts_btn = QPushButton("🔊 TTS")
+        self._tts_btn.setFixedWidth(60)
         self._tts_btn.setStyleSheet(self._btn_style("primary"))
         self._tts_btn.clicked.connect(self.tts_clicked.emit)
-        btn_layout.addWidget(self._tts_btn)
+        tts_layout.addWidget(self._tts_btn)
 
-        self._regenerate_btn = QPushButton("🔄 Redo")
+        self._tts_play_btn = QPushButton("▶")
+        self._tts_play_btn.setFixedWidth(28)
+        self._tts_play_btn.setStyleSheet(self._btn_style("secondary"))
+        self._tts_play_btn.clicked.connect(self.tts_play_clicked.emit)
+        self._tts_play_btn.hide()
+        tts_layout.addWidget(self._tts_play_btn)
+
+        self._tts_stop_btn = QPushButton("⏹")
+        self._tts_stop_btn.setFixedWidth(28)
+        self._tts_stop_btn.setStyleSheet(self._btn_style("secondary"))
+        self._tts_stop_btn.clicked.connect(self.tts_stop_clicked.emit)
+        self._tts_stop_btn.hide()
+        tts_layout.addWidget(self._tts_stop_btn)
+
+        self._tts_progress = QProgressBar()
+        self._tts_progress.setMaximumHeight(14)
+        self._tts_progress.setTextVisible(False)
+        self._tts_progress.setStyleSheet("""
+            QProgressBar {
+                background-color: #1e1e1e;
+                border: 1px solid #444444;
+                border-radius: 4px;
+            }
+            QProgressBar::chunk {
+                background-color: #0078d4;
+                border-radius: 3px;
+            }
+        """)
+        self._tts_progress.hide()
+        tts_layout.addWidget(self._tts_progress, 1)
+
+        # TTS settings button
+        self._tts_settings_btn = QPushButton("⚙")
+        self._tts_settings_btn.setFixedWidth(28)
+        self._tts_settings_btn.setToolTip("TTS Settings")
+        self._tts_settings_btn.setStyleSheet(self._btn_style("secondary"))
+        self._tts_settings_btn.clicked.connect(self.tts_settings_clicked.emit)
+        tts_layout.addWidget(self._tts_settings_btn)
+
+        content_layout.addLayout(tts_layout)
+
+        # Regenerate button
+        regen_layout = QHBoxLayout()
+        regen_layout.setSpacing(6)
+
+        self._regenerate_btn = QPushButton("🔄 Regenerate")
         self._regenerate_btn.setStyleSheet(self._btn_style("secondary"))
         self._regenerate_btn.clicked.connect(self.regenerate_clicked.emit)
-        btn_layout.addWidget(self._regenerate_btn)
+        regen_layout.addWidget(self._regenerate_btn)
 
-        btn_layout.addStretch()
-        content_layout.addLayout(btn_layout)
+        regen_layout.addStretch()
+        content_layout.addLayout(regen_layout)
 
         layout.addWidget(self._content_widget, 1)
 
@@ -430,7 +479,47 @@ class AnnotationDetailView(QWidget):
         self._corrected_display.clear()
         self._translated_display.clear()
         self._explain_display.clear()
+        self.reset_tts_player()
         self.set_status("Ready")
+
+    # ─── TTS Player UI ───────────────────────────────────────────────────
+
+    def show_tts_generating(self):
+        """Show TTS generating state."""
+        self._tts_btn.setEnabled(False)
+        self._tts_progress.show()
+        self._tts_progress.setRange(0, 0)  # Indeterminate
+        self._tts_play_btn.hide()
+        self._tts_stop_btn.hide()
+
+    def show_tts_ready(self, duration_seconds: int):
+        """Show TTS ready-to-play state with controls."""
+        self._tts_btn.setEnabled(True)
+        self._tts_progress.show()
+        self._tts_progress.setRange(0, max(1, duration_seconds))
+        self._tts_progress.setValue(0)
+        self._tts_play_btn.show()
+        self._tts_play_btn.setText("⏸")  # Start playing immediately
+        self._tts_stop_btn.show()
+
+    def update_tts_progress(self, value: int, maximum: int = -1):
+        """Update TTS playback progress."""
+        if maximum >= 0:
+            self._tts_progress.setMaximum(maximum)
+        self._tts_progress.setValue(value)
+
+    def set_tts_playing(self, playing: bool):
+        """Update play button state based on whether audio is playing."""
+        self._tts_play_btn.setEnabled(not playing)
+        self._tts_stop_btn.setEnabled(playing)
+
+    def reset_tts_player(self):
+        """Reset TTS player to initial state."""
+        self._tts_btn.setEnabled(True)
+        self._tts_progress.hide()
+        self._tts_progress.setValue(0)
+        self._tts_play_btn.hide()
+        self._tts_stop_btn.hide()
 
 
 # ─── Annotation Panel ─────────────────────────────────────────────────────────
@@ -446,6 +535,9 @@ class AnnotationPanel(QWidget):
     retranslate_clicked = Signal()
     explain_clicked = Signal()
     tts_clicked = Signal()
+    tts_play_clicked = Signal()
+    tts_stop_clicked = Signal()
+    tts_settings_clicked = Signal()
     regenerate_clicked = Signal()
 
     def __init__(self, parent=None):
@@ -526,6 +618,10 @@ class AnnotationPanel(QWidget):
             self.retranslate_clicked.emit)
         self._detail_view.explain_clicked.connect(self.explain_clicked.emit)
         self._detail_view.tts_clicked.connect(self.tts_clicked.emit)
+        self._detail_view.tts_play_clicked.connect(self.tts_play_clicked.emit)
+        self._detail_view.tts_stop_clicked.connect(self.tts_stop_clicked.emit)
+        self._detail_view.tts_settings_clicked.connect(
+            self.tts_settings_clicked.emit)
         self._detail_view.regenerate_clicked.connect(
             self.regenerate_clicked.emit)
         splitter.addWidget(self._detail_view)

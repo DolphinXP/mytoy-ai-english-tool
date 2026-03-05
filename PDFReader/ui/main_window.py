@@ -22,6 +22,7 @@ from PDFReader.core.app import PDFReaderApp
 from PDFReader.core.ai_processor import AIProcessor
 from PDFReader.models.annotation import Annotation
 from core.thread_manager import ThreadManager
+from services.audio.file_player import FileAudioPlayer
 
 _parent_dir = str(Path(__file__).parent.parent.parent)
 if _parent_dir not in sys.path:
@@ -59,6 +60,11 @@ class MainWindow(QMainWindow):
         # Recent document history and last-used directory
         self._last_open_dir: str = ""
         self._recent_docs: List[str] = self._load_history()
+        # Audio player for TTS
+        self._audio_player = FileAudioPlayer()
+        self._tts_update_timer = QTimer(self)
+        self._tts_update_timer.setInterval(200)
+        self._tts_update_timer.timeout.connect(self._update_tts_progress)
         self._setup_ui()
         self._setup_menu_bar()
         self._setup_shortcuts()
@@ -274,6 +280,8 @@ class MainWindow(QMainWindow):
         self._toolbar.zoom_in_clicked.connect(self._app.zoom_in)
         self._toolbar.zoom_out_clicked.connect(self._app.zoom_out)
         self._toolbar.zoom_reset_clicked.connect(self._app.reset_zoom)
+        self._toolbar.zoom_fit_width_clicked.connect(self._fit_to_width)
+        self._toolbar.zoom_fit_window_clicked.connect(self._fit_to_window)
         self._toolbar.zoom_level_changed.connect(self._app.set_zoom)
         self._toolbar.toggle_annotations_clicked.connect(
             self._toggle_annotation_panel)
@@ -305,6 +313,10 @@ class MainWindow(QMainWindow):
             self._on_retranslate)
         self._annotation_panel.explain_clicked.connect(self._on_explain)
         self._annotation_panel.tts_clicked.connect(self._on_tts)
+        self._annotation_panel.tts_play_clicked.connect(self._on_tts_play)
+        self._annotation_panel.tts_stop_clicked.connect(self._on_tts_stop)
+        self._annotation_panel.tts_settings_clicked.connect(
+            self._on_tts_settings)
         self._annotation_panel.regenerate_clicked.connect(self._on_regenerate)
 
         # Annotation manager
@@ -335,10 +347,8 @@ class MainWindow(QMainWindow):
             self._on_translation_error)
         self._ai_processor.explain_chunk.connect(self._on_explain_chunk)
         self._ai_processor.explain_done.connect(self._on_explain_done)
-        self._ai_processor.tts_finished.connect(
-            lambda: self._annotation_panel.detail_view.set_status("Ready"))
-        self._ai_processor.tts_error.connect(
-            lambda e: self._annotation_panel.detail_view.set_status(f"TTS error: {e}"))
+        self._ai_processor.tts_completed.connect(self._on_tts_audio_ready)
+        self._ai_processor.tts_error.connect(self._on_tts_error)
 
     # ─── File / Document ──────────────────────────────────────────────────
 
@@ -396,6 +406,33 @@ class MainWindow(QMainWindow):
         self._toolbar.set_zoom_level(zoom)
         self._render_current_page()
         self._update_page_highlights()
+
+    def _fit_to_width(self):
+        """Zoom so the page width fits the viewer viewport width."""
+        if not self._app.is_document_loaded:
+            return
+        page_w, _page_h = self._app.pdf_service.get_page_size(
+            self._app.current_page)
+        if page_w <= 0:
+            return
+        viewport_w = self._viewer.get_viewport_size().width()
+        # Subtract a small margin for scrollbar clearance
+        zoom = (viewport_w - 20) / page_w
+        self._app.set_zoom(max(0.25, min(4.0, zoom)))
+
+    def _fit_to_window(self):
+        """Zoom so the entire page fits in the viewer viewport."""
+        if not self._app.is_document_loaded:
+            return
+        page_w, page_h = self._app.pdf_service.get_page_size(
+            self._app.current_page)
+        if page_w <= 0 or page_h <= 0:
+            return
+        viewport = self._viewer.get_viewport_size()
+        zoom_w = (viewport.width() - 20) / page_w
+        zoom_h = (viewport.height() - 20) / page_h
+        zoom = min(zoom_w, zoom_h)
+        self._app.set_zoom(max(0.25, min(4.0, zoom)))
 
     def _on_error(self, message: str):
         QMessageBox.warning(self, "Error", message)
@@ -630,11 +667,130 @@ class MainWindow(QMainWindow):
                 corrected, detail.get_translated_text())
 
     def _on_tts(self):
+        """Generate TTS audio and start playback."""
         detail = self._annotation_panel.detail_view
         corrected = detail.get_corrected_text()
         if corrected:
-            detail.set_status("Playing TTS...")
+            # Stop any current playback
+            self._stop_tts_playback()
+            detail.set_status("Generating TTS audio...")
+            detail.show_tts_generating()
             self._ai_processor.start_tts(corrected)
+
+    def _on_tts_audio_ready(self, file_path: str):
+        """Handle TTS audio file ready — load and play immediately."""
+        detail = self._annotation_panel.detail_view
+        try:
+            duration = self._audio_player.load_audio(file_path)
+            detail.show_tts_ready(duration)
+            self._start_tts_playback()
+        except Exception as e:
+            detail.set_status(f"TTS playback error: {e}")
+            detail.reset_tts_player()
+
+    def _on_tts_error(self, error: str):
+        detail = self._annotation_panel.detail_view
+        detail.set_status(f"TTS error: {error}")
+        detail.reset_tts_player()
+
+    def _on_tts_play(self):
+        """Play TTS audio from the beginning."""
+        if self._audio_player.audio_file_path:
+            self._start_tts_playback()
+
+    def _on_tts_stop(self):
+        """Stop TTS playback."""
+        self._stop_tts_playback()
+
+    def _start_tts_playback(self):
+        """Start file-based audio playback."""
+        detail = self._annotation_panel.detail_view
+        if self._audio_player.play():
+            detail.set_tts_playing(True)
+            detail.set_status("Playing...")
+            self._tts_update_timer.start()
+
+    def _stop_tts_playback(self):
+        """Stop file-based audio playback and reset UI."""
+        self._audio_player.stop()
+        self._tts_update_timer.stop()
+        detail = self._annotation_panel.detail_view
+        detail.set_tts_playing(False)
+        length = self._audio_player.audio_length
+        detail.update_tts_progress(0, length if length > 0 else 100)
+        detail.set_status("Ready")
+
+    def _update_tts_progress(self):
+        """Timer callback to update TTS progress bar."""
+        detail = self._annotation_panel.detail_view
+        self._audio_player.update_position()
+        pos = self._audio_player.current_position
+        length = self._audio_player.audio_length
+
+        if length > 0:
+            detail.update_tts_progress(int(pos), int(length))
+
+        # Check if playback finished
+        if not self._audio_player.is_busy():
+            self._tts_update_timer.stop()
+            self._audio_player.is_playing = False
+            detail.set_tts_playing(False)
+            detail.update_tts_progress(0, int(length) if length > 0 else 100)
+            detail.set_status("Ready")
+
+    def _on_tts_settings(self):
+        """Show TTS settings dialog."""
+        from PySide6.QtWidgets import QDialog, QFormLayout, QRadioButton, QLineEdit, QDialogButtonBox, QButtonGroup
+        from services.tts.remote_tts import RemoteTTSManager
+
+        manager = RemoteTTSManager()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("TTS Settings")
+        dialog.setFixedWidth(400)
+        dialog.setStyleSheet("""
+            QDialog { background-color: #2d2d2d; color: #ffffff; }
+            QLabel { color: #cccccc; }
+            QRadioButton { color: #cccccc; }
+            QLineEdit {
+                background-color: #3c3c3c; color: #ffffff;
+                border: 1px solid #555; border-radius: 4px; padding: 4px;
+            }
+        """)
+
+        form = QFormLayout(dialog)
+
+        # TTS source selection
+        group = QButtonGroup(dialog)
+        remote_radio = QRadioButton("Remote TTS (WebSocket)")
+        local_radio = QRadioButton("Local TTS (System)")
+        group.addButton(remote_radio, 0)
+        group.addButton(local_radio, 1)
+        remote_radio.setChecked(True)
+        form.addRow("Source:", remote_radio)
+        form.addRow("", local_radio)
+
+        # Server URL
+        url_input = QLineEdit(manager.get_server_url())
+        form.addRow("Server URL:", url_input)
+
+        # Voice preset
+        voice_input = QLineEdit(manager.get_voice_preset())
+        form.addRow("Voice:", voice_input)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.setStyleSheet("""
+            QPushButton { background-color: #0078d4; color: white; border: none; padding: 6px 16px; border-radius: 4px; }
+            QPushButton:hover { background-color: #1084d8; }
+        """)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() == QDialog.Accepted:
+            manager.set_server_url(url_input.text().strip())
+            manager.set_voice_preset(voice_input.text().strip())
 
     def _on_regenerate(self):
         detail = self._annotation_panel.detail_view
@@ -656,6 +812,8 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def closeEvent(self, event):
+        self._tts_update_timer.stop()
+        self._audio_player.cleanup()
         self._ai_processor.stop_all()
         self._app.close_document()
         event.accept()
