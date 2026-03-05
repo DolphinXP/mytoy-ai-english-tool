@@ -1,17 +1,31 @@
 """
-Annotation CRUD operations manager.
+Annotation CRUD operations manager with JSON file persistence.
+
+Stores annotations as a JSON file alongside the PDF document.
+For a PDF at '/path/to/document.pdf', annotations are stored at
+'/path/to/document_annotations.json'.
 """
-from typing import List, Optional, Callable
+import json
+import os
+from typing import List, Optional
+from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from PDFReader.models.annotation import Annotation
-from PDFReader.db.database import AnnotationDatabase
 from PDFReader.utils.helpers import normalize_path
+
+
+def _annotations_path(document_path: str) -> str:
+    """Compute the JSON annotations file path for a given PDF document."""
+    p = Path(document_path)
+    return str(p.parent / f"{p.stem}_annotations.json")
 
 
 class AnnotationManager(QObject):
     """
-    Manages annotation lifecycle and persistence.
+    Manages annotation lifecycle with JSON file persistence.
+
+    Annotations are saved to a JSON file in the same directory as the PDF.
 
     Signals:
         annotation_created: Emitted when a new annotation is created
@@ -28,7 +42,6 @@ class AnnotationManager(QObject):
     def __init__(self, parent=None):
         """Initialize annotation manager."""
         super().__init__(parent)
-        self._database = AnnotationDatabase()
         self._current_document: str = ""
         self._annotations: dict[str, Annotation] = {}  # id -> Annotation
 
@@ -39,7 +52,7 @@ class AnnotationManager(QObject):
 
     def set_document(self, document_path: str):
         """
-        Set current document and load its annotations.
+        Set current document and load its annotations from JSON.
 
         Args:
             document_path: Path to PDF document
@@ -48,10 +61,8 @@ class AnnotationManager(QObject):
         self._annotations.clear()
 
         if self._current_document:
-            annotations = self._database.get_by_document(self._current_document)
-            for ann in annotations:
-                self._annotations[ann.id] = ann
-            self.annotations_loaded.emit(annotations)
+            self._load_from_json()
+            self.annotations_loaded.emit(list(self._annotations.values()))
 
     def create(self, page_number: int, selected_text: str,
                text_rects: list, corrected_text: str = "",
@@ -80,8 +91,8 @@ class AnnotationManager(QObject):
             explanation=explanation,
         )
 
-        self._database.save(annotation)
         self._annotations[annotation.id] = annotation
+        self._save_to_json()
         self.annotation_created.emit(annotation)
 
         return annotation
@@ -99,9 +110,7 @@ class AnnotationManager(QObject):
         """
         annotation = self._annotations.get(annotation_id)
         if not annotation:
-            annotation = self._database.get_by_id(annotation_id)
-            if not annotation:
-                return None
+            return None
 
         # Update fields
         for key, value in kwargs.items():
@@ -109,8 +118,8 @@ class AnnotationManager(QObject):
                 setattr(annotation, key, value)
 
         annotation.update_timestamp()
-        self._database.save(annotation)
         self._annotations[annotation.id] = annotation
+        self._save_to_json()
         self.annotation_updated.emit(annotation)
 
         return annotation
@@ -128,15 +137,13 @@ class AnnotationManager(QObject):
         if annotation_id in self._annotations:
             del self._annotations[annotation_id]
 
-        self._database.delete(annotation_id)
+        self._save_to_json()
         self.annotation_deleted.emit(annotation_id)
         return True
 
     def get(self, annotation_id: str) -> Optional[Annotation]:
         """Get annotation by ID."""
-        if annotation_id in self._annotations:
-            return self._annotations[annotation_id]
-        return self._database.get_by_id(annotation_id)
+        return self._annotations.get(annotation_id)
 
     def get_all(self) -> List[Annotation]:
         """Get all annotations for current document."""
@@ -148,9 +155,14 @@ class AnnotationManager(QObject):
 
     def search(self, query: str) -> List[Annotation]:
         """Search annotations by text content."""
-        if not self._current_document:
-            return []
-        return self._database.search(self._current_document, query)
+        query_lower = query.lower()
+        results = []
+        for ann in self._annotations.values():
+            if (query_lower in ann.selected_text.lower() or
+                    query_lower in ann.corrected_text.lower() or
+                    query_lower in ann.translated_text.lower()):
+                results.append(ann)
+        return results
 
     def get_count(self) -> int:
         """Get total annotation count for current document."""
@@ -158,7 +170,51 @@ class AnnotationManager(QObject):
 
     def clear_document(self):
         """Clear all annotations for current document."""
-        if self._current_document:
-            self._database.delete_by_document(self._current_document)
-            self._annotations.clear()
-            self.annotations_loaded.emit([])
+        self._annotations.clear()
+        self._save_to_json()
+        self.annotations_loaded.emit([])
+
+    # ─── JSON Persistence ─────────────────────────────────────────────────
+
+    def _load_from_json(self):
+        """Load annotations from the JSON file alongside the PDF."""
+        json_path = _annotations_path(self._current_document)
+        if not os.path.exists(json_path):
+            return
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            for ann_data in data.get("annotations", []):
+                # Ensure document_path is set correctly
+                ann_data["document_path"] = self._current_document
+                ann = Annotation.from_dict(ann_data)
+                self._annotations[ann.id] = ann
+
+        except Exception as e:
+            print(f"Error loading annotations from {json_path}: {e}")
+
+    def _save_to_json(self):
+        """Save all annotations to the JSON file alongside the PDF."""
+        if not self._current_document:
+            return
+
+        json_path = _annotations_path(self._current_document)
+
+        try:
+            annotations_data = []
+            for ann in sorted(self._annotations.values(),
+                              key=lambda a: (a.page_number, a.created_at)):
+                annotations_data.append(ann.to_dict())
+
+            data = {
+                "document_path": self._current_document,
+                "annotations": annotations_data,
+            }
+
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+        except Exception as e:
+            print(f"Error saving annotations to {json_path}: {e}")

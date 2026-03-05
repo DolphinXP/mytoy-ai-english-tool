@@ -205,7 +205,7 @@ class AnnotationDetailView(QWidget):
         self._translated_display = self._create_text_display(100)
         self._content_layout.addWidget(self._translated_display)
 
-        # Explanation
+        # Explanation (stretches to fill remaining space, renders markdown)
         explain_header = QHBoxLayout()
         explain_header.addWidget(self._section_label("Explanation"))
         self._explain_btn = self._small_btn("Explain")
@@ -214,11 +214,11 @@ class AnnotationDetailView(QWidget):
         explain_header.addStretch()
         self._content_layout.addLayout(explain_header)
 
-        self._explain_display = self._create_text_display(120)
+        self._explain_display = self._create_markdown_display()
         self._explain_display.hide()
-        self._content_layout.addWidget(self._explain_display)
+        self._content_layout.addWidget(
+            self._explain_display, 1)  # stretch factor 1
 
-        self._content_layout.addStretch()
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
 
@@ -312,6 +312,23 @@ class AnnotationDetailView(QWidget):
         """)
         return display
 
+    def _create_markdown_display(self) -> QTextEdit:
+        """Create a text display that renders markdown and stretches to fill space."""
+        display = QTextEdit()
+        display.setReadOnly(True)
+        display.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                border: 1px solid #444444;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 12px;
+                color: #e0e0e0;
+            }
+        """)
+        display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        return display
+
     def _copy_text(self, text_type: str):
         clipboard = QApplication.clipboard()
         if text_type == 'corrected':
@@ -342,7 +359,7 @@ class AnnotationDetailView(QWidget):
         self._translated_display.setPlainText(annotation.translated_text or "")
         self._explanation = annotation.explanation
         if annotation.explanation:
-            self._explain_display.setPlainText(annotation.explanation)
+            self._explain_display.setMarkdown(annotation.explanation)
             self._explain_display.show()
         else:
             self._explain_display.hide()
@@ -386,15 +403,14 @@ class AnnotationDetailView(QWidget):
 
     def set_explanation(self, text: str):
         self._explanation = text
-        self._explain_display.setPlainText(text)
+        self._explain_display.setMarkdown(text)
         self._explain_display.show()
 
     def append_explain_chunk(self, chunk: str):
-        current = self._explain_display.toPlainText()
-        if current == "Explaining...":
-            current = ""
-        self._explain_display.setPlainText(current + chunk)
-        self._explanation = current + chunk
+        if self._explanation == "" or self._explanation == "Explaining...":
+            self._explanation = ""
+        self._explanation += chunk
+        self._explain_display.setMarkdown(self._explanation)
         self._explain_display.show()
 
     def set_status(self, status: str):
@@ -417,6 +433,7 @@ class AnnotationDetailView(QWidget):
         self.set_status("Translating...")
 
     def start_explanation(self):
+        self._explanation = "Explaining..."
         self._explain_display.setPlainText("Explaining...")
         self._explain_display.show()
         self.set_status("Generating explanation...")

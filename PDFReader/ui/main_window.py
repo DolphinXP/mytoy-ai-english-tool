@@ -1,23 +1,27 @@
 """Main window for PDFReader application."""
-from core.thread_manager import ThreadManager
-from PDFReader.models.annotation import Annotation
-from PDFReader.core.ai_processor import AIProcessor
-from PDFReader.core.app import PDFReaderApp
-from PDFReader.ui.context_menu import TextContextMenu
-from PDFReader.ui.side_panel import SidePanel
-from PDFReader.ui.status_bar import StatusBarWidget
-from PDFReader.ui.annotation_panel import AnnotationPanel
-from PDFReader.ui.pdf_viewer import PDFViewerWidget
-from PDFReader.ui.toolbar import ToolbarWidget
-from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QColor
-from PySide6.QtCore import Qt, QPoint, QTimer
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QFileDialog, QMessageBox, QApplication
-)
-from typing import Optional
+import json
+import os
 import sys
 from pathlib import Path
+from typing import Optional, List
+
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QSplitter, QFileDialog, QMessageBox, QApplication, QMenuBar, QMenu
+)
+from PySide6.QtCore import Qt, QPoint, QTimer
+from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QColor, QAction
+
+from PDFReader.ui.toolbar import ToolbarWidget
+from PDFReader.ui.pdf_viewer import PDFViewerWidget
+from PDFReader.ui.annotation_panel import AnnotationPanel
+from PDFReader.ui.status_bar import StatusBarWidget
+from PDFReader.ui.side_panel import SidePanel
+from PDFReader.ui.context_menu import TextContextMenu
+from PDFReader.core.app import PDFReaderApp
+from PDFReader.core.ai_processor import AIProcessor
+from PDFReader.models.annotation import Annotation
+from core.thread_manager import ThreadManager
 
 _parent_dir = str(Path(__file__).parent.parent.parent)
 if _parent_dir not in sys.path:
@@ -36,6 +40,10 @@ DARK_THEME = """
 class MainWindow(QMainWindow):
     """Main application window."""
 
+    # Path for persisting recent document history
+    _HISTORY_FILE = os.path.join(
+        os.environ.get("APPDATA", str(Path.home())), "PDFReader", "history.json")
+
     def __init__(self):
         super().__init__()
         self._app = PDFReaderApp()
@@ -48,9 +56,137 @@ class MainWindow(QMainWindow):
         self._annotation_panel_sizes = [980, 420]
         # Track which annotation is currently being processed by AI
         self._processing_annotation_id: Optional[str] = None
+        # Recent document history
+        self._recent_docs: List[str] = self._load_history()
         self._setup_ui()
+        self._setup_menu_bar()
         self._setup_shortcuts()
         self._connect_signals()
+
+    def _setup_menu_bar(self):
+        """Create the application menu bar with File menu."""
+        menu_bar = self.menuBar()
+        menu_bar.setStyleSheet("""
+            QMenuBar {
+                background-color: #252526;
+                color: #cccccc;
+                border-bottom: 1px solid #333333;
+                padding: 2px;
+            }
+            QMenuBar::item {
+                padding: 4px 10px;
+                background: transparent;
+            }
+            QMenuBar::item:selected {
+                background-color: #3c3c3c;
+            }
+            QMenu {
+                background-color: #2d2d2d;
+                border: 1px solid #454545;
+                color: #ffffff;
+                padding: 4px 0;
+            }
+            QMenu::item {
+                padding: 6px 30px 6px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #0078d4;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #454545;
+                margin: 4px 8px;
+            }
+        """)
+
+        # File menu
+        file_menu = menu_bar.addMenu("&File")
+
+        # Open action
+        open_action = QAction("&Open...", self)
+        open_action.setShortcut(QKeySequence.Open)
+        open_action.triggered.connect(self._on_open_file)
+        file_menu.addAction(open_action)
+
+        file_menu.addSeparator()
+
+        # History submenu
+        self._history_menu = file_menu.addMenu("Recent &Documents")
+        self._rebuild_history_menu()
+
+    def _rebuild_history_menu(self):
+        """Rebuild the history submenu with recent documents."""
+        self._history_menu.clear()
+
+        if self._recent_docs:
+            for doc_path in self._recent_docs:
+                name = Path(doc_path).name
+                action = QAction(name, self)
+                action.setToolTip(doc_path)
+                action.setData(doc_path)
+                action.triggered.connect(
+                    lambda checked, p=doc_path: self._open_recent_document(p))
+                self._history_menu.addAction(action)
+
+            self._history_menu.addSeparator()
+
+        clear_action = QAction("Clear All History", self)
+        clear_action.triggered.connect(self._clear_history)
+        self._history_menu.addAction(clear_action)
+
+    def _open_recent_document(self, doc_path: str):
+        """Open a document from the recent history."""
+        if Path(doc_path).exists():
+            self._app.open_document(doc_path)
+        else:
+            QMessageBox.warning(
+                self, "File Not Found",
+                f"The file no longer exists:\n{doc_path}")
+            # Remove from history
+            if doc_path in self._recent_docs:
+                self._recent_docs.remove(doc_path)
+                self._save_history()
+                self._rebuild_history_menu()
+
+    def _add_to_history(self, file_path: str):
+        """Add a document to the recent history."""
+        # Normalize path
+        normalized = str(Path(file_path).resolve())
+        # Remove if already exists (will re-add at top)
+        if normalized in self._recent_docs:
+            self._recent_docs.remove(normalized)
+        # Add to top
+        self._recent_docs.insert(0, normalized)
+        # Limit to 20 entries
+        self._recent_docs = self._recent_docs[:20]
+        self._save_history()
+        self._rebuild_history_menu()
+
+    def _clear_history(self):
+        """Clear all document history."""
+        self._recent_docs.clear()
+        self._save_history()
+        self._rebuild_history_menu()
+
+    def _load_history(self) -> List[str]:
+        """Load document history from disk."""
+        try:
+            if os.path.exists(self._HISTORY_FILE):
+                with open(self._HISTORY_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    return data if isinstance(data, list) else []
+        except Exception:
+            pass
+        return []
+
+    def _save_history(self):
+        """Save document history to disk."""
+        try:
+            os.makedirs(os.path.dirname(self._HISTORY_FILE), exist_ok=True)
+            with open(self._HISTORY_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self._recent_docs, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
 
     def _setup_ui(self):
         self.setWindowTitle("PDF Reader")
@@ -106,7 +242,6 @@ class MainWindow(QMainWindow):
         self._context_menu = TextContextMenu(self)
 
     def _setup_shortcuts(self):
-        QShortcut(QKeySequence.Open, self, self._on_open_file)
         QShortcut(QKeySequence(Qt.Key_Left), self, self._app.previous_page)
         QShortcut(QKeySequence(Qt.Key_Right), self, self._app.next_page)
         QShortcut(QKeySequence(Qt.Key_Home), self, self._app.first_page)
@@ -212,6 +347,8 @@ class MainWindow(QMainWindow):
         self._render_current_page()
         bookmarks = self._app.pdf_service.get_bookmarks()
         self._side_panel.set_bookmarks(bookmarks)
+        # Add to recent documents history
+        self._add_to_history(file_path)
 
     def _on_document_closed(self):
         self._viewer.clear()
