@@ -17,6 +17,7 @@ class PDFPageWidget(QWidget):
     # (selected_text, word_rects in page coords)
     text_selected = Signal(str, list)
     page_clicked = Signal(QPoint)  # global position
+    right_clicked = Signal(QPoint)  # global position
     # Emitted when user clicks on an annotation highlight (annotation_id)
     highlight_clicked = Signal(str)
 
@@ -266,6 +267,9 @@ class PDFPageWidget(QWidget):
             self._update_selection_rects()
             self.selection_started.emit()
             self.update()
+        elif event.button() == Qt.RightButton and self._pixmap:
+            self.right_clicked.emit(self.mapToGlobal(event.pos()))
+            event.accept()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         """Handle double-click to select a single word."""
@@ -360,6 +364,7 @@ class PDFViewerWidget(QScrollArea):
     selection_made = Signal(tuple, str, list)
     highlight_clicked = Signal(str)  # annotation_id
     page_clicked = Signal(QPoint)
+    right_clicked = Signal(QPoint)
     page_up_requested = Signal()
     page_down_requested = Signal()
     zoom_in_requested = Signal()
@@ -409,6 +414,7 @@ class PDFViewerWidget(QScrollArea):
 
         self._page_widget.text_selected.connect(self._on_text_selected)
         self._page_widget.page_clicked.connect(self.page_clicked.emit)
+        self._page_widget.right_clicked.connect(self.right_clicked.emit)
         self._page_widget.highlight_clicked.connect(
             self.highlight_clicked.emit)
 

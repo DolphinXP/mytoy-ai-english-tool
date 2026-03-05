@@ -330,6 +330,7 @@ class MainWindow(QMainWindow):
         self._viewer.selection_made.connect(self._on_selection_made)
         self._viewer.page_clicked.connect(self._hide_quick_translate_popup)
         self._viewer.page_clicked.connect(self._hide_quick_tts_popup)
+        self._viewer.right_clicked.connect(self._on_viewer_right_clicked)
         self._viewer.highlight_clicked.connect(self._on_highlight_clicked)
         self._viewer.page_up_requested.connect(self._on_viewer_page_up_requested)
         self._viewer.page_down_requested.connect(self._on_viewer_page_down_requested)
@@ -693,10 +694,14 @@ class MainWindow(QMainWindow):
         self._current_text_rects = text_rects
         self._current_selected_text = text
         self._quick_translate_anchor_global = self._selection_anchor_global(rect)
-        # Show context menu at bottom-right of selection, mapped from page widget coordinates
+        # Keep original behavior: auto-show menu when text is selected/double-clicked.
         global_pos = self._viewer.map_page_to_global(
-            QPoint(int(rect[2]), int(rect[3])))
+            QPoint(int(rect[2]), int(rect[3]))
+        )
         self._context_menu.show_at(global_pos, text)
+
+    def _on_viewer_right_clicked(self, global_pos: QPoint):
+        self._context_menu.show_at(global_pos, self._current_selected_text)
 
     def _clear_selection(self):
         self._viewer.clear_selection()

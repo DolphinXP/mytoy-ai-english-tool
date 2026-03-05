@@ -18,6 +18,8 @@ class QuickTranslatePopup(QFrame):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._dragging = False
+        self._drag_offset = QPoint()
         self._setup_ui()
         self.hide()
 
@@ -126,3 +128,25 @@ class QuickTranslatePopup(QFrame):
 
     def _on_close_clicked(self):
         self.close_requested.emit()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._dragging = True
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging and (event.buttons() & Qt.LeftButton):
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._dragging = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
