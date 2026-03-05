@@ -137,6 +137,8 @@ class MainWindow(QMainWindow):
         self._viewer.selection_made.connect(self._on_selection_made)
         self._viewer.page_up_requested.connect(self._app.previous_page)
         self._viewer.page_down_requested.connect(self._app.next_page)
+        self._viewer.zoom_in_requested.connect(self._app.zoom_in)
+        self._viewer.zoom_out_requested.connect(self._app.zoom_out)
 
         # Annotation panel
         self._annotation_panel.annotation_selected.connect(

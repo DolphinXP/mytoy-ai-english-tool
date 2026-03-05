@@ -311,6 +311,8 @@ class PDFViewerWidget(QScrollArea):
     page_clicked = Signal(QPoint)
     page_up_requested = Signal()
     page_down_requested = Signal()
+    zoom_in_requested = Signal()
+    zoom_out_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -379,13 +381,22 @@ class PDFViewerWidget(QScrollArea):
         self._page_widget.clear_selection()
 
     def wheelEvent(self, event: QWheelEvent):
-        """Handle mouse wheel for page navigation."""
-        # Check if at scroll boundaries
+        """Handle mouse wheel for scrolling, page navigation, and Ctrl+wheel zoom."""
+        delta = event.angleDelta().y()
+
+        # Ctrl+wheel: zoom in/out
+        if event.modifiers() & Qt.ControlModifier:
+            if delta > 0:
+                self.zoom_in_requested.emit()
+            elif delta < 0:
+                self.zoom_out_requested.emit()
+            event.accept()
+            return
+
+        # Check if at scroll boundaries for page navigation
         vbar = self.verticalScrollBar()
         at_top = vbar.value() <= vbar.minimum()
         at_bottom = vbar.value() >= vbar.maximum()
-
-        delta = event.angleDelta().y()
 
         if delta > 0 and at_top:
             # Scroll up at top - go to previous page
