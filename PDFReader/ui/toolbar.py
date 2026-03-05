@@ -3,7 +3,7 @@ Toolbar widget for PDFReader.
 """
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QPushButton, QLabel, QSpinBox,
-    QComboBox, QToolButton, QSizePolicy
+    QComboBox, QToolButton, QSizePolicy, QMenu
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon, QFont
@@ -88,6 +88,13 @@ class ToolbarWidget(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(4)
+
+        # File menu button (menu is attached by MainWindow)
+        self._file_menu_btn = QToolButton()
+        self._file_menu_btn.setText("File")
+        self._file_menu_btn.setPopupMode(QToolButton.InstantPopup)
+        self._file_menu_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        layout.addWidget(self._file_menu_btn)
 
         # Open file button
         self._open_btn = QPushButton("📂 Open")
@@ -208,6 +215,10 @@ class ToolbarWidget(QWidget):
 
         # Initially disable navigation
         self._set_navigation_enabled(False)
+
+    def set_file_menu(self, menu: QMenu):
+        """Attach the File menu to the toolbar button."""
+        self._file_menu_btn.setMenu(menu)
 
     def _on_zoom_text_changed(self, text: str):
         """Handle zoom combo text change."""

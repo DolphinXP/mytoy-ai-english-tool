@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Optional, List
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QFileDialog, QMessageBox, QApplication, QMenuBar, QMenu
+    QMainWindow, QWidget, QVBoxLayout,
+    QSplitter, QFileDialog, QMessageBox, QApplication, QMenu
 )
 from PySide6.QtCore import Qt, QPoint, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QColor, QAction
@@ -66,27 +66,13 @@ class MainWindow(QMainWindow):
         self._tts_update_timer.setInterval(200)
         self._tts_update_timer.timeout.connect(self._update_tts_progress)
         self._setup_ui()
-        self._setup_menu_bar()
+        self._setup_file_menu()
         self._setup_shortcuts()
         self._connect_signals()
 
-    def _setup_menu_bar(self):
-        """Create the application menu bar with File menu."""
-        menu_bar = self.menuBar()
-        menu_bar.setStyleSheet("""
-            QMenuBar {
-                background-color: #252526;
-                color: #cccccc;
-                border-bottom: 1px solid #333333;
-                padding: 2px;
-            }
-            QMenuBar::item {
-                padding: 4px 10px;
-                background: transparent;
-            }
-            QMenuBar::item:selected {
-                background-color: #3c3c3c;
-            }
+    def _setup_file_menu(self):
+        """Create the File menu and attach it to the toolbar."""
+        menu_style = """
             QMenu {
                 background-color: #2d2d2d;
                 border: 1px solid #454545;
@@ -104,22 +90,25 @@ class MainWindow(QMainWindow):
                 background-color: #454545;
                 margin: 4px 8px;
             }
-        """)
+        """
 
-        # File menu
-        file_menu = menu_bar.addMenu("&File")
+        self._file_menu = QMenu("File", self)
+        self._file_menu.setStyleSheet(menu_style)
 
         # Open action
         open_action = QAction("&Open...", self)
         open_action.setShortcut(QKeySequence.Open)
         open_action.triggered.connect(self._on_open_file)
-        file_menu.addAction(open_action)
+        self.addAction(open_action)
+        self._file_menu.addAction(open_action)
 
-        file_menu.addSeparator()
+        self._file_menu.addSeparator()
 
-        # History submenu
-        self._history_menu = file_menu.addMenu("Recent &Documents")
+        # Recent-documents submenu
+        self._history_menu = self._file_menu.addMenu("Recent &Documents")
+        self._history_menu.setStyleSheet(menu_style)
         self._rebuild_history_menu()
+        self._toolbar.set_file_menu(self._file_menu)
 
     def _rebuild_history_menu(self):
         """Rebuild the history submenu with recent documents."""
@@ -220,14 +209,8 @@ class MainWindow(QMainWindow):
         self._toolbar = ToolbarWidget()
         layout.addWidget(self._toolbar)
 
-        # Main content with side panel
-        content_layout = QHBoxLayout()
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
-        # Side panel (bookmarks + history)
+        # Left side panel (bookmarks only)
         self._side_panel = SidePanel()
-        content_layout.addWidget(self._side_panel)
 
         # Splitter for viewer and annotation panel
         self._splitter = QSplitter(Qt.Horizontal)
@@ -248,8 +231,19 @@ class MainWindow(QMainWindow):
         self._splitter.setCollapsible(0, False)
         self._splitter.setCollapsible(1, True)
 
-        content_layout.addWidget(self._splitter, 1)
-        layout.addLayout(content_layout, 1)
+        # Outer splitter makes the left panel user-resizable
+        self._main_splitter = QSplitter(Qt.Horizontal)
+        self._main_splitter.setStyleSheet(
+            "QSplitter::handle { background-color: #333333; width: 2px; }")
+        self._main_splitter.addWidget(self._side_panel)
+        self._main_splitter.addWidget(self._splitter)
+        self._main_splitter.setSizes([240, 1160])
+        self._main_splitter.setStretchFactor(0, 0)
+        self._main_splitter.setStretchFactor(1, 1)
+        self._main_splitter.setCollapsible(0, True)
+        self._main_splitter.setCollapsible(1, False)
+
+        layout.addWidget(self._main_splitter, 1)
 
         self._status_bar = StatusBarWidget()
         layout.addWidget(self._status_bar)
@@ -334,7 +328,6 @@ class MainWindow(QMainWindow):
 
         # Side panel
         self._side_panel.bookmark_clicked.connect(self._app.go_to_page)
-        self._side_panel.history_clicked.connect(self._on_history_clicked)
 
         # AI processor signals
         self._ai_processor.correction_chunk.connect(self._on_correction_chunk)
@@ -397,10 +390,6 @@ class MainWindow(QMainWindow):
         self._clear_selection()
         self._render_current_page()
         self._update_page_highlights()
-        if self._app.is_document_loaded:
-            doc_path = self._app.pdf_service.document_path
-            self._side_panel.add_history(
-                doc_path, page, Path(doc_path).stem if doc_path else "Unknown")
 
     def _on_zoom_changed(self, zoom: float):
         self._toolbar.set_zoom_level(zoom)
@@ -574,11 +563,6 @@ class MainWindow(QMainWindow):
             self._annotation_panel.show()
             self._splitter.setSizes(self._annotation_panel_sizes)
             self._annotation_panel_visible = True
-
-    def _on_history_clicked(self, doc_path: str, page: int):
-        if self._app.pdf_service.document_path != doc_path:
-            self._app.open_document(doc_path)
-        self._app.go_to_page(page)
 
     # ─── AI Processing Pipeline ───────────────────────────────────────────
 

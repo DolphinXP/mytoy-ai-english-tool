@@ -163,7 +163,7 @@ class AnnotationDetailView(QWidget):
 
         # Original text
         content_layout.addWidget(self._section_label("Original Text"))
-        self._original_display = self._create_text_display(50)
+        self._original_display = self._create_text_display(80)
         content_layout.addWidget(self._original_display)
 
         # Corrected text
@@ -176,7 +176,7 @@ class AnnotationDetailView(QWidget):
         corrected_header.addStretch()
         content_layout.addLayout(corrected_header)
 
-        self._corrected_display = self._create_text_display(60)
+        self._corrected_display = self._create_text_display(100)
         content_layout.addWidget(self._corrected_display)
 
         # Translation
@@ -186,13 +186,13 @@ class AnnotationDetailView(QWidget):
         self._copy_trans_btn.clicked.connect(
             lambda: self._copy_text('translated'))
         trans_header.addWidget(self._copy_trans_btn)
-        self._retranslate_btn = self._small_btn("Redo Trans")
+        self._retranslate_btn = self._small_btn("Re-translate", max_width=110)
         self._retranslate_btn.clicked.connect(self.retranslate_clicked.emit)
         trans_header.addWidget(self._retranslate_btn)
         trans_header.addStretch()
         content_layout.addLayout(trans_header)
 
-        self._translated_display = self._create_text_display(80)
+        self._translated_display = self._create_text_display(120)
         content_layout.addWidget(self._translated_display)
 
         # Explanation (stretches to fill ALL remaining space, renders markdown)
@@ -300,9 +300,9 @@ class AnnotationDetailView(QWidget):
         label.setStyleSheet("color: #888888;")
         return label
 
-    def _small_btn(self, text: str) -> QPushButton:
+    def _small_btn(self, text: str, max_width: int = 70) -> QPushButton:
         btn = QPushButton(text)
-        btn.setMaximumWidth(70)
+        btn.setMaximumWidth(max_width)
         btn.setStyleSheet(self._btn_style("secondary"))
         return btn
 
