@@ -68,6 +68,9 @@ class MainWindow(QMainWindow):
         # Render at higher resolution then downscale for smoother text edges.
         self._render_supersample_factor: float = 2.0
         self._active_fit_mode: Optional[str] = None  # "width" | "page" | None
+        # Used for wheel-based cross-page scrolling:
+        # "top" -> show start of next page, "bottom" -> show tail of previous page.
+        self._pending_boundary_scroll: Optional[str] = None
         self._bookmarks_by_doc: Dict[str, List[Tuple[str, int, int]]] = {}
         self._bookmarks: List[Tuple[str, int, int]] = []
         self._recent_docs: List[str] = self._load_history()
@@ -319,8 +322,8 @@ class MainWindow(QMainWindow):
         self._viewer.selection_made.connect(self._on_selection_made)
         self._viewer.page_clicked.connect(self._hide_quick_translate_popup)
         self._viewer.highlight_clicked.connect(self._on_highlight_clicked)
-        self._viewer.page_up_requested.connect(self._app.previous_page)
-        self._viewer.page_down_requested.connect(self._app.next_page)
+        self._viewer.page_up_requested.connect(self._on_viewer_page_up_requested)
+        self._viewer.page_down_requested.connect(self._on_viewer_page_down_requested)
         self._viewer.zoom_in_requested.connect(self._on_zoom_in_requested)
         self._viewer.zoom_out_requested.connect(self._on_zoom_out_requested)
 
@@ -508,8 +511,33 @@ class MainWindow(QMainWindow):
         self._clear_selection()
         self._render_current_page()
         self._update_page_highlights()
+        self._apply_pending_boundary_scroll()
         # Save position when page changes
         self._save_current_view_position()
+
+    def _on_viewer_page_up_requested(self):
+        """Wheel-scroll crossed top boundary: show previous page tail."""
+        self._pending_boundary_scroll = "bottom"
+        if not self._app.previous_page():
+            self._pending_boundary_scroll = None
+
+    def _on_viewer_page_down_requested(self):
+        """Wheel-scroll crossed bottom boundary: show next page start."""
+        self._pending_boundary_scroll = "top"
+        if not self._app.next_page():
+            self._pending_boundary_scroll = None
+
+    def _apply_pending_boundary_scroll(self):
+        """Apply deferred scroll anchor after page render."""
+        if self._pending_boundary_scroll is None:
+            return
+
+        v_bar = self._viewer.verticalScrollBar()
+        if self._pending_boundary_scroll == "top":
+            v_bar.setValue(v_bar.minimum())
+        elif self._pending_boundary_scroll == "bottom":
+            v_bar.setValue(v_bar.maximum())
+        self._pending_boundary_scroll = None
 
     def _on_zoom_changed(self, zoom: float):
         self._toolbar.set_zoom_level(zoom)
