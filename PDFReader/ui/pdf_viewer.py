@@ -265,6 +265,25 @@ class PDFPageWidget(QWidget):
             self.selection_started.emit()
             self.update()
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """Handle double-click to select a single word."""
+        if event.button() == Qt.LeftButton and self._pixmap:
+            word_idx = self._find_word_at_pos(event.pos())
+            if word_idx >= 0:
+                # Select just this word
+                self._start_word_idx = word_idx
+                self._end_word_idx = word_idx
+                self._is_selecting = False
+                self._external_text_rects.clear()
+                self._update_selection_rects()
+                self.update()
+                
+                # Emit the selection
+                text, text_rects = self._get_selected_text_and_rects()
+                if text.strip():
+                    self.text_selected.emit(text, text_rects)
+            event.accept()
+
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._is_selecting and self._pixmap:
             self._end_word_idx = self._find_word_at_pos(event.pos())
