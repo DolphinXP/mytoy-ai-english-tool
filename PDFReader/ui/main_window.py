@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
     QSplitter, QFileDialog, QMessageBox, QApplication, QMenu
 )
-from PySide6.QtCore import Qt, QPoint, QTimer
+from PySide6.QtCore import Qt, QPoint, QTimer, QEvent
 from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QColor, QAction
 
 from PDFReader.ui.toolbar import ToolbarWidget
@@ -60,6 +60,9 @@ class MainWindow(QMainWindow):
         # Recent document history and last-used directory
         self._last_open_dir: str = ""
         self._view_positions: dict = {}  # Maps file path to (page, scroll_x, scroll_y, zoom)
+        # Render at higher resolution then downscale for smoother text edges.
+        self._render_supersample_factor: float = 2.0
+        self._active_fit_mode: Optional[str] = None  # "width" | "page" | None
         self._bookmarks_by_doc: Dict[str, List[Tuple[str, int, int]]] = {}
         self._bookmarks: List[Tuple[str, int, int]] = []
         self._recent_docs: List[str] = self._load_history()
@@ -234,6 +237,7 @@ class MainWindow(QMainWindow):
             "QSplitter::handle { background-color: #333333; width: 2px; }")
 
         self._viewer = PDFViewerWidget()
+        self._viewer.viewport().installEventFilter(self)
         self._splitter.addWidget(self._viewer)
 
         self._annotation_panel = AnnotationPanel()
@@ -274,9 +278,9 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_End), self, self._app.last_page)
         QShortcut(QKeySequence(Qt.Key_PageUp), self, self._app.previous_page)
         QShortcut(QKeySequence(Qt.Key_PageDown), self, self._app.next_page)
-        QShortcut(QKeySequence.ZoomIn, self, self._app.zoom_in)
-        QShortcut(QKeySequence.ZoomOut, self, self._app.zoom_out)
-        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_0), self, self._app.reset_zoom)
+        QShortcut(QKeySequence.ZoomIn, self, self._on_zoom_in_requested)
+        QShortcut(QKeySequence.ZoomOut, self, self._on_zoom_out_requested)
+        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_0), self, self._on_zoom_reset_requested)
         QShortcut(QKeySequence(Qt.Key_Escape), self, self._clear_selection)
 
     def _connect_signals(self):
@@ -287,12 +291,12 @@ class MainWindow(QMainWindow):
         self._toolbar.next_page_clicked.connect(self._app.next_page)
         self._toolbar.last_page_clicked.connect(self._app.last_page)
         self._toolbar.page_number_changed.connect(self._app.go_to_page)
-        self._toolbar.zoom_in_clicked.connect(self._app.zoom_in)
-        self._toolbar.zoom_out_clicked.connect(self._app.zoom_out)
-        self._toolbar.zoom_reset_clicked.connect(self._app.reset_zoom)
-        self._toolbar.zoom_fit_width_clicked.connect(self._fit_to_width)
-        self._toolbar.zoom_fit_window_clicked.connect(self._fit_to_window)
-        self._toolbar.zoom_level_changed.connect(self._app.set_zoom)
+        self._toolbar.zoom_in_clicked.connect(self._on_zoom_in_requested)
+        self._toolbar.zoom_out_clicked.connect(self._on_zoom_out_requested)
+        self._toolbar.zoom_reset_clicked.connect(self._on_zoom_reset_requested)
+        self._toolbar.zoom_fit_width_toggled.connect(self._on_fit_width_toggled)
+        self._toolbar.zoom_fit_window_toggled.connect(self._on_fit_page_toggled)
+        self._toolbar.zoom_level_changed.connect(self._on_zoom_level_changed)
         self._toolbar.regenerate_clicked.connect(self._on_regenerate)
         self._toolbar.toggle_annotations_clicked.connect(
             self._toggle_annotation_panel)
@@ -309,8 +313,8 @@ class MainWindow(QMainWindow):
         self._viewer.highlight_clicked.connect(self._on_highlight_clicked)
         self._viewer.page_up_requested.connect(self._app.previous_page)
         self._viewer.page_down_requested.connect(self._app.next_page)
-        self._viewer.zoom_in_requested.connect(self._app.zoom_in)
-        self._viewer.zoom_out_requested.connect(self._app.zoom_out)
+        self._viewer.zoom_in_requested.connect(self._on_zoom_in_requested)
+        self._viewer.zoom_out_requested.connect(self._on_zoom_out_requested)
 
         # Annotation panel
         self._annotation_panel.annotation_selected.connect(
@@ -423,6 +427,7 @@ class MainWindow(QMainWindow):
         self._load_bookmarks_for_document(file_path)
         # Add to recent documents history
         self._add_to_history(file_path)
+        self._apply_active_fit_mode()
     
     def _restore_scroll_position(self, x: int, y: int):
         """Restore scroll position in the viewer."""
@@ -493,6 +498,54 @@ class MainWindow(QMainWindow):
         # Save position when zoom changes
         self._save_current_view_position()
 
+    def _on_zoom_in_requested(self):
+        self._clear_fit_mode()
+        self._app.zoom_in()
+
+    def _on_zoom_out_requested(self):
+        self._clear_fit_mode()
+        self._app.zoom_out()
+
+    def _on_zoom_reset_requested(self):
+        self._clear_fit_mode()
+        self._app.reset_zoom()
+
+    def _on_zoom_level_changed(self, zoom: float):
+        self._clear_fit_mode()
+        self._app.set_zoom(zoom)
+
+    def _on_fit_width_toggled(self, checked: bool):
+        if checked:
+            self._active_fit_mode = "width"
+            self._toolbar.set_fit_mode("width")
+            self._fit_to_width()
+        elif self._active_fit_mode == "width":
+            self._active_fit_mode = None
+            self._toolbar.set_fit_mode(None)
+
+    def _on_fit_page_toggled(self, checked: bool):
+        if checked:
+            self._active_fit_mode = "page"
+            self._toolbar.set_fit_mode("page")
+            self._fit_to_window()
+        elif self._active_fit_mode == "page":
+            self._active_fit_mode = None
+            self._toolbar.set_fit_mode(None)
+
+    def _clear_fit_mode(self):
+        if self._active_fit_mode is None:
+            return
+        self._active_fit_mode = None
+        self._toolbar.set_fit_mode(None)
+
+    def _apply_active_fit_mode(self):
+        if not self._app.is_document_loaded:
+            return
+        if self._active_fit_mode == "width":
+            self._fit_to_width()
+        elif self._active_fit_mode == "page":
+            self._fit_to_window()
+
     def _fit_to_width(self):
         """Zoom so the page width fits the viewer viewport width."""
         if not self._app.is_document_loaded:
@@ -526,18 +579,41 @@ class MainWindow(QMainWindow):
     def _render_current_page(self):
         if not self._app.is_document_loaded:
             return
+
+        render_zoom = self._app.zoom_level * self._render_supersample_factor
         pixmap_data = self._app.pdf_service.get_page_pixmap(
-            self._app.current_page, self._app.zoom_level)
+            self._app.current_page, render_zoom)
         if pixmap_data:
             from PySide6.QtGui import QImage
+            from PySide6.QtCore import QSize
+
+            image_format = (
+                QImage.Format_RGBA8888
+                if getattr(pixmap_data, "alpha", False)
+                else QImage.Format_RGB888
+            )
             img = QImage(
                 pixmap_data.samples, pixmap_data.width,
                 pixmap_data.height, pixmap_data.stride,
-                QImage.Format_RGB888)
+                image_format
+            ).copy()
+            pixmap = QPixmap.fromImage(img)
+
+            if self._render_supersample_factor > 1.0:
+                target_size = QSize(
+                    max(1, int(round(pixmap.width() / self._render_supersample_factor))),
+                    max(1, int(round(pixmap.height() / self._render_supersample_factor))),
+                )
+                pixmap = pixmap.scaled(
+                    target_size,
+                    Qt.IgnoreAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+
             words = self._app.pdf_service.get_text_words(
                 self._app.current_page)
             self._viewer.display_pixmap(
-                QPixmap.fromImage(img), self._app.zoom_level, words)
+                pixmap, self._app.zoom_level, words)
 
     # ─── Selection ────────────────────────────────────────────────────────
 
@@ -997,6 +1073,12 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._apply_active_fit_mode()
+
+    def eventFilter(self, watched, event):
+        if watched is self._viewer.viewport() and event.type() == QEvent.Resize:
+            self._apply_active_fit_mode()
+        return super().eventFilter(watched, event)
 
     def closeEvent(self, event):
         # Save current view position before closing

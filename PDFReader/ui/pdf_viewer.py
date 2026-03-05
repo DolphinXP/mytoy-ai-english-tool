@@ -324,6 +324,8 @@ class PDFPageWidget(QWidget):
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.setRenderHint(QPainter.TextAntialiasing)
 
         if self._pixmap:
             painter.drawPixmap(0, 0, self._pixmap)

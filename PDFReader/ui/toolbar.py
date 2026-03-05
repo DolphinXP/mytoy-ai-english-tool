@@ -3,7 +3,7 @@ Toolbar widget for PDFReader.
 """
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QPushButton, QLabel, QSpinBox,
-    QComboBox, QToolButton, QMenu, QStyle
+    QComboBox, QToolButton, QMenu, QStyle, QButtonGroup
 )
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QFontMetrics
@@ -43,8 +43,8 @@ class ToolbarWidget(QWidget):
     zoom_in_clicked = Signal()
     zoom_out_clicked = Signal()
     zoom_reset_clicked = Signal()
-    zoom_fit_width_clicked = Signal()
-    zoom_fit_window_clicked = Signal()
+    zoom_fit_width_toggled = Signal(bool)
+    zoom_fit_window_toggled = Signal(bool)
     zoom_level_changed = Signal(float)
     regenerate_clicked = Signal()
     toggle_annotations_clicked = Signal()
@@ -76,6 +76,11 @@ class ToolbarWidget(QWidget):
             }
             QPushButton:pressed, QToolButton:pressed {
                 background-color: #2a2d2e;
+            }
+            QPushButton:checked, QToolButton:checked {
+                background-color: #0e639c;
+                border-color: #0e639c;
+                color: #ffffff;
             }
             QPushButton:disabled, QToolButton:disabled {
                 color: #6b6b6b;
@@ -214,17 +219,24 @@ class ToolbarWidget(QWidget):
 
         self._fit_width_btn = QPushButton("Fit Width")
         self._fit_width_btn.setToolTip("Fit page width to viewer")
-        self._fit_width_btn.clicked.connect(self.zoom_fit_width_clicked.emit)
+        self._fit_width_btn.setCheckable(True)
+        self._fit_width_btn.toggled.connect(self.zoom_fit_width_toggled.emit)
         self._fit_width_btn.setIcon(_create_text_icon("↔", 22))
         self._fit_width_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._fit_width_btn)
 
         self._fit_window_btn = QPushButton("Fit Page")
         self._fit_window_btn.setToolTip("Fit entire page in viewer")
-        self._fit_window_btn.clicked.connect(self.zoom_fit_window_clicked.emit)
+        self._fit_window_btn.setCheckable(True)
+        self._fit_window_btn.toggled.connect(self.zoom_fit_window_toggled.emit)
         self._fit_window_btn.setIcon(_create_text_icon("⛶", 22))
         self._fit_window_btn.setIconSize(QSize(22, 22))
         layout.addWidget(self._fit_window_btn)
+
+        self._fit_group = QButtonGroup(self)
+        self._fit_group.setExclusive(False)
+        self._fit_group.addButton(self._fit_width_btn)
+        self._fit_group.addButton(self._fit_window_btn)
 
         layout.addStretch()
 
@@ -319,3 +331,12 @@ class ToolbarWidget(QWidget):
         self._fit_width_btn.setEnabled(enabled)
         self._fit_window_btn.setEnabled(enabled)
         self._regenerate_btn.setEnabled(enabled)
+
+    def set_fit_mode(self, mode: str):
+        """Set fit mode check state: 'width', 'page', or None."""
+        self._fit_width_btn.blockSignals(True)
+        self._fit_window_btn.blockSignals(True)
+        self._fit_width_btn.setChecked(mode == "width")
+        self._fit_window_btn.setChecked(mode == "page")
+        self._fit_width_btn.blockSignals(False)
+        self._fit_window_btn.blockSignals(False)
