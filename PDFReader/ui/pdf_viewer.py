@@ -410,6 +410,10 @@ class PDFViewerWidget(QScrollArea):
     def clear_selection(self):
         self._page_widget.clear_selection()
 
+    def map_page_to_global(self, pos: QPoint) -> QPoint:
+        """Map a position in page widget display coordinates to global screen coordinates."""
+        return self._page_widget.mapToGlobal(pos)
+
     def wheelEvent(self, event: QWheelEvent):
         """Handle mouse wheel for scrolling, page navigation, and Ctrl+wheel zoom."""
         delta = event.angleDelta().y()

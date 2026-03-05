@@ -56,7 +56,8 @@ class MainWindow(QMainWindow):
         self._annotation_panel_sizes = [980, 420]
         # Track which annotation is currently being processed by AI
         self._processing_annotation_id: Optional[str] = None
-        # Recent document history
+        # Recent document history and last-used directory
+        self._last_open_dir: str = ""
         self._recent_docs: List[str] = self._load_history()
         self._setup_ui()
         self._setup_menu_bar()
@@ -174,7 +175,12 @@ class MainWindow(QMainWindow):
             if os.path.exists(self._HISTORY_FILE):
                 with open(self._HISTORY_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    return data if isinstance(data, list) else []
+                    if isinstance(data, dict):
+                        # New format with last_dir
+                        self._last_open_dir = data.get("last_dir", "")
+                        return data.get("recent", [])
+                    elif isinstance(data, list):
+                        return data
         except Exception:
             pass
         return []
@@ -183,8 +189,12 @@ class MainWindow(QMainWindow):
         """Save document history to disk."""
         try:
             os.makedirs(os.path.dirname(self._HISTORY_FILE), exist_ok=True)
+            data = {
+                "recent": self._recent_docs,
+                "last_dir": self._last_open_dir,
+            }
             with open(self._HISTORY_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self._recent_docs, f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 
@@ -333,10 +343,21 @@ class MainWindow(QMainWindow):
     # ─── File / Document ──────────────────────────────────────────────────
 
     def _on_open_file(self):
+        # Determine starting directory
+        start_dir = self._last_open_dir
+        if not start_dir or not os.path.isdir(start_dir):
+            # Fall back to My Documents
+            start_dir = str(Path.home() / "Documents")
+            if not os.path.isdir(start_dir):
+                start_dir = str(Path.home())
+
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open PDF File", "", "PDF Files (*.pdf);;All Files (*)"
+            self, "Open PDF File", start_dir, "PDF Files (*.pdf);;All Files (*)"
         )
         if file_path:
+            # Remember the directory for next time
+            self._last_open_dir = str(Path(file_path).parent)
+            self._save_history()
             self._app.open_document(file_path)
 
     def _on_document_loaded(self, file_path: str):
@@ -403,8 +424,8 @@ class MainWindow(QMainWindow):
         self._current_selection_rect = rect
         self._current_text_rects = text_rects
         self._current_selected_text = text
-        # Show context menu at selection end
-        global_pos = self._viewer.mapToGlobal(
+        # Show context menu at bottom-right of selection, mapped from page widget coordinates
+        global_pos = self._viewer.map_page_to_global(
             QPoint(int(rect[2]), int(rect[3])))
         self._context_menu.show_at(global_pos, text)
 
