@@ -2,7 +2,7 @@
 from typing import List
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QStyle
+    QListWidget, QListWidgetItem, QStyle, QMenu, QInputDialog
 )
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
@@ -50,9 +50,12 @@ class BookmarkPanel(QWidget):
     """Panel for displaying PDF bookmarks/outline."""
 
     bookmark_clicked = Signal(int)  # page_number
+    bookmark_edited = Signal(int, str)  # index, new_title
+    bookmark_deleted = Signal(int)  # index
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._bookmarks: List[tuple] = []
         self._setup_ui()
 
     def _setup_ui(self):
@@ -80,6 +83,9 @@ class BookmarkPanel(QWidget):
             }
         """)
         self._list.itemClicked.connect(self._on_item_clicked)
+        self._list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(
+            self._on_context_menu_requested)
         layout.addWidget(self._list)
 
         self._empty_label = QLabel("No bookmarks in this PDF")
@@ -89,8 +95,11 @@ class BookmarkPanel(QWidget):
 
     def set_bookmarks(self, bookmarks: List[tuple]):
         """Set bookmarks list. Each tuple: (title, page_number, level)."""
+        self._bookmarks = sorted(
+            list(bookmarks), key=lambda item: (item[1], str(item[0]).lower())
+        )
         self._list.clear()
-        if not bookmarks:
+        if not self._bookmarks:
             self._empty_label.show()
             self._list.hide()
             return
@@ -98,11 +107,13 @@ class BookmarkPanel(QWidget):
         self._empty_label.hide()
         self._list.show()
 
-        for title, page, level in bookmarks:
+        for idx, (title, page, level) in enumerate(self._bookmarks):
             item = QListWidgetItem()
             indent = "  " * level
             item.setText(f"{indent}{title}")
             item.setData(Qt.UserRole, page)
+            item.setData(Qt.UserRole + 1, idx)
+            item.setData(Qt.UserRole + 2, title)
             self._list.addItem(item)
 
     def _on_item_clicked(self, item: QListWidgetItem):
@@ -110,11 +121,37 @@ class BookmarkPanel(QWidget):
         if page is not None:
             self.bookmark_clicked.emit(page)
 
+    def _on_context_menu_requested(self, pos):
+        item = self._list.itemAt(pos)
+        if item is None:
+            return
+
+        index = item.data(Qt.UserRole + 1)
+        current_title = item.data(Qt.UserRole + 2) or ""
+        if index is None:
+            return
+
+        menu = QMenu(self)
+        edit_action = menu.addAction("Edit Bookmark")
+        delete_action = menu.addAction("Delete Bookmark")
+        chosen = menu.exec(self._list.mapToGlobal(pos))
+        if chosen == edit_action:
+            new_title, ok = QInputDialog.getText(
+                self, "Edit Bookmark", "Bookmark title:", text=current_title)
+            if ok:
+                new_title = new_title.strip()
+                if new_title:
+                    self.bookmark_edited.emit(index, new_title)
+        elif chosen == delete_action:
+            self.bookmark_deleted.emit(index)
+
 
 class SidePanel(QWidget):
     """Collapsible side panel with bookmarks."""
 
     bookmark_clicked = Signal(int)
+    bookmark_edited = Signal(int, str)
+    bookmark_deleted = Signal(int)
     collapse_toggled = Signal(bool)
 
     def __init__(self, parent=None):
@@ -158,6 +195,8 @@ class SidePanel(QWidget):
 
         self._bookmark_panel = BookmarkPanel()
         self._bookmark_panel.bookmark_clicked.connect(self.bookmark_clicked.emit)
+        self._bookmark_panel.bookmark_edited.connect(self.bookmark_edited.emit)
+        self._bookmark_panel.bookmark_deleted.connect(self.bookmark_deleted.emit)
         layout.addWidget(self._bookmark_panel)
 
         self.setMinimumWidth(160)

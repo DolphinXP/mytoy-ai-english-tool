@@ -10,6 +10,7 @@ class TextContextMenu(QObject):
     """Context menu with Mark option for creating annotations."""
 
     mark_clicked = Signal(str)  # selected_text
+    add_bookmark_clicked = Signal(str)  # selected_text
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,11 +49,28 @@ class TextContextMenu(QObject):
         self._mark_action.triggered.connect(self._on_mark)
         self._menu.addAction(self._mark_action)
 
+        # Add Bookmark submenu
+        self._add_bookmark_menu = self._menu.addMenu("Add Bookmark")
+        self._add_bookmark_from_selection_action = QAction(
+            "Use Selected Text", self._add_bookmark_menu
+        )
+        self._add_bookmark_from_selection_action.triggered.connect(
+            self._on_add_bookmark
+        )
+        self._add_bookmark_menu.addAction(self._add_bookmark_from_selection_action)
+
     def show_at(self, pos: QPoint, text: str):
         """Show context menu at position with selected text."""
         self._selected_text = text
+        has_text = bool(text and text.strip())
+        self._mark_action.setEnabled(has_text)
+        self._add_bookmark_menu.setEnabled(has_text)
         self._menu.popup(pos)
 
     def _on_mark(self):
         if self._selected_text:
             self.mark_clicked.emit(self._selected_text)
+
+    def _on_add_bookmark(self):
+        if self._selected_text:
+            self.add_bookmark_clicked.emit(self._selected_text)

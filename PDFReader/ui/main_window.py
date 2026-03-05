@@ -3,7 +3,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Tuple, Any
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
@@ -60,6 +60,8 @@ class MainWindow(QMainWindow):
         # Recent document history and last-used directory
         self._last_open_dir: str = ""
         self._view_positions: dict = {}  # Maps file path to (page, scroll_x, scroll_y, zoom)
+        self._bookmarks_by_doc: Dict[str, List[Tuple[str, int, int]]] = {}
+        self._bookmarks: List[Tuple[str, int, int]] = []
         self._recent_docs: List[str] = self._load_history()
         # Audio player for TTS
         self._audio_player = FileAudioPlayer()
@@ -176,6 +178,12 @@ class MainWindow(QMainWindow):
                         # New format with last_dir and view positions
                         self._last_open_dir = data.get("last_dir", "")
                         self._view_positions = data.get("view_positions", {})
+                        raw_bookmarks = data.get("bookmarks", {})
+                        if isinstance(raw_bookmarks, dict):
+                            self._bookmarks_by_doc = {
+                                str(k): self._normalize_bookmarks(v)
+                                for k, v in raw_bookmarks.items()
+                            }
                         return data.get("recent", [])
                     elif isinstance(data, list):
                         return data
@@ -191,6 +199,10 @@ class MainWindow(QMainWindow):
                 "recent": self._recent_docs,
                 "last_dir": self._last_open_dir,
                 "view_positions": getattr(self, '_view_positions', {}),
+                "bookmarks": {
+                    path: self._serialize_bookmarks(bookmarks)
+                    for path, bookmarks in self._bookmarks_by_doc.items()
+                },
             }
             with open(self._HISTORY_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -329,9 +341,13 @@ class MainWindow(QMainWindow):
 
         # Context menu — Mark action
         self._context_menu.mark_clicked.connect(self._on_mark_selection)
+        self._context_menu.add_bookmark_clicked.connect(
+            self._on_add_bookmark_from_selection)
 
         # Side panel
         self._side_panel.bookmark_clicked.connect(self._app.go_to_page)
+        self._side_panel.bookmark_edited.connect(self._on_bookmark_edited)
+        self._side_panel.bookmark_deleted.connect(self._on_bookmark_deleted)
 
         # AI processor signals
         self._ai_processor.correction_chunk.connect(self._on_correction_chunk)
@@ -404,8 +420,7 @@ class MainWindow(QMainWindow):
         
         self._status_bar.set_document_info(file_path, self._app.page_count)
         self.setWindowTitle(f"PDF Reader - {Path(file_path).name}")
-        bookmarks = self._app.pdf_service.get_bookmarks()
-        self._side_panel.set_bookmarks(bookmarks)
+        self._load_bookmarks_for_document(file_path)
         # Add to recent documents history
         self._add_to_history(file_path)
     
@@ -423,6 +438,8 @@ class MainWindow(QMainWindow):
         self._viewer.clear()
         self._toolbar.set_page_count(0)
         self._status_bar.set_document_info("", 0)
+        self._bookmarks = []
+        self._side_panel.set_bookmarks([])
         self.setWindowTitle("PDF Reader")
     
     def _save_current_view_position(self):
@@ -575,6 +592,112 @@ class MainWindow(QMainWindow):
         self._clear_selection()
 
     # ─── Highlight Click ──────────────────────────────────────────────────
+
+    def _load_bookmarks_for_document(self, file_path: str):
+        normalized_path = str(Path(file_path).resolve())
+        if normalized_path in self._bookmarks_by_doc:
+            self._bookmarks = self._sort_bookmarks(
+                self._bookmarks_by_doc[normalized_path]
+            )
+        else:
+            pdf_bookmarks = self._app.pdf_service.get_bookmarks()
+            self._bookmarks = self._sort_bookmarks(
+                self._normalize_bookmarks(pdf_bookmarks)
+            )
+            self._bookmarks_by_doc[normalized_path] = list(self._bookmarks)
+            self._save_history()
+        self._refresh_bookmark_panel()
+
+    def _refresh_bookmark_panel(self):
+        self._bookmarks = self._sort_bookmarks(self._bookmarks)
+        self._side_panel.set_bookmarks(self._bookmarks)
+
+    def _persist_current_bookmarks(self):
+        file_path = self._app.pdf_service.file_path
+        if not file_path:
+            return
+        normalized_path = str(Path(file_path).resolve())
+        self._bookmarks_by_doc[normalized_path] = list(
+            self._sort_bookmarks(self._bookmarks)
+        )
+        self._save_history()
+
+    def _on_add_bookmark_from_selection(self, selected_text: str):
+        if not self._app.is_document_loaded:
+            return
+        title = self._truncate_bookmark_title(selected_text)
+        if not title:
+            return
+        self._bookmarks.append((title, self._app.current_page, 0))
+        self._refresh_bookmark_panel()
+        self._persist_current_bookmarks()
+        self._status_bar.set_status("Bookmark added")
+        QTimer.singleShot(1500, self._status_bar.clear_status)
+
+    def _on_bookmark_edited(self, index: int, new_title: str):
+        if index < 0 or index >= len(self._bookmarks):
+            return
+        _, page, level = self._bookmarks[index]
+        self._bookmarks[index] = (new_title, page, level)
+        self._refresh_bookmark_panel()
+        self._persist_current_bookmarks()
+        self._status_bar.set_status("Bookmark updated")
+        QTimer.singleShot(1500, self._status_bar.clear_status)
+
+    def _on_bookmark_deleted(self, index: int):
+        if index < 0 or index >= len(self._bookmarks):
+            return
+        del self._bookmarks[index]
+        self._refresh_bookmark_panel()
+        self._persist_current_bookmarks()
+        self._status_bar.set_status("Bookmark deleted")
+        QTimer.singleShot(1500, self._status_bar.clear_status)
+
+    @staticmethod
+    def _truncate_bookmark_title(text: str, max_len: int = 60) -> str:
+        clean = " ".join((text or "").split())
+        if not clean:
+            return ""
+        if len(clean) <= max_len:
+            return clean
+        return clean[:max_len - 3].rstrip() + "..."
+
+    @staticmethod
+    def _sort_bookmarks(bookmarks: List[Tuple[str, int, int]]) -> List[Tuple[str, int, int]]:
+        return sorted(bookmarks, key=lambda item: (item[1], item[0].lower()))
+
+    @staticmethod
+    def _serialize_bookmarks(bookmarks: List[Tuple[str, int, int]]) -> List[dict]:
+        return [
+            {"title": title, "page": page, "level": level}
+            for title, page, level in bookmarks
+        ]
+
+    @staticmethod
+    def _normalize_bookmarks(raw_bookmarks: Any) -> List[Tuple[str, int, int]]:
+        normalized: List[Tuple[str, int, int]] = []
+        if not isinstance(raw_bookmarks, list):
+            return normalized
+        for item in raw_bookmarks:
+            if isinstance(item, (list, tuple)) and len(item) >= 3:
+                title, page, level = item[0], item[1], item[2]
+            elif isinstance(item, dict):
+                title = item.get("title", "")
+                page = item.get("page", 0)
+                level = item.get("level", 0)
+            else:
+                continue
+            if not isinstance(title, str):
+                title = str(title)
+            try:
+                page = int(page)
+                level = int(level)
+            except (TypeError, ValueError):
+                continue
+            if page < 0:
+                continue
+            normalized.append((title.strip() or "Bookmark", page, max(0, level)))
+        return normalized
 
     def _on_highlight_clicked(self, annotation_id: str):
         """Handle click on a highlighted annotation area."""
