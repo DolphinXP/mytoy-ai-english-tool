@@ -12,6 +12,7 @@ class TextContextMenu(QObject):
     mark_clicked = Signal(str)  # selected_text
     add_bookmark_clicked = Signal(str)  # selected_text
     translate_to_chinese_clicked = Signal(str)  # selected_text
+    tts_play_clicked = Signal(str)  # selected_text
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,28 +45,29 @@ class TextContextMenu(QObject):
                 margin: 4px 8px;
             }
         """)
-
-        # Mark action - creates annotation with selected text
-        self._mark_action = QAction("Mark Selection", self._menu)
-        self._mark_action.triggered.connect(self._on_mark)
-        self._menu.addAction(self._mark_action)
-
+        
         # Direct translate action
         self._translate_to_chinese_action = QAction("To Chinese", self._menu)
         self._translate_to_chinese_action.triggered.connect(
             self._on_translate_to_chinese
         )
         self._menu.addAction(self._translate_to_chinese_action)
-        
-        # Add Bookmark submenu
-        self._add_bookmark_menu = self._menu.addMenu("Add Bookmark")
-        self._add_bookmark_from_selection_action = QAction(
-            "Use Selected Text", self._add_bookmark_menu
-        )
-        self._add_bookmark_from_selection_action.triggered.connect(
-            self._on_add_bookmark
-        )
-        self._add_bookmark_menu.addAction(self._add_bookmark_from_selection_action)
+
+        # Mark action - creates annotation with selected text
+        self._mark_action = QAction("Mark Selection", self._menu)
+        self._mark_action.triggered.connect(self._on_mark)
+        self._menu.addAction(self._mark_action)
+
+        # Add Bookmark action
+        self._add_bookmark_action = QAction("Add Bookmark", self._menu)
+        self._add_bookmark_action.triggered.connect(self._on_add_bookmark)
+        self._menu.addAction(self._add_bookmark_action)
+
+        # TTS submenu
+        self._tts_menu = self._menu.addMenu("TTS")
+        self._tts_play_action = QAction("Play", self._tts_menu)
+        self._tts_play_action.triggered.connect(self._on_tts_play)
+        self._tts_menu.addAction(self._tts_play_action)
 
 
     def show_at(self, pos: QPoint, text: str):
@@ -73,8 +75,9 @@ class TextContextMenu(QObject):
         self._selected_text = text
         has_text = bool(text and text.strip())
         self._mark_action.setEnabled(has_text)
-        self._add_bookmark_menu.setEnabled(has_text)
+        self._add_bookmark_action.setEnabled(has_text)
         self._translate_to_chinese_action.setEnabled(has_text)
+        self._tts_menu.setEnabled(has_text)
         self._menu.popup(pos)
 
     def _on_mark(self):
@@ -88,3 +91,7 @@ class TextContextMenu(QObject):
     def _on_translate_to_chinese(self):
         if self._selected_text:
             self.translate_to_chinese_clicked.emit(self._selected_text)
+
+    def _on_tts_play(self):
+        if self._selected_text:
+            self.tts_play_clicked.emit(self._selected_text)

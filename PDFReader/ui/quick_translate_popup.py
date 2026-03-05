@@ -1,10 +1,20 @@
 """Floating popup for quick translation results."""
-from PySide6.QtCore import Qt, QPoint
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QTextEdit, QApplication
+from PySide6.QtCore import Qt, QPoint, Signal
+from PySide6.QtWidgets import (
+    QFrame,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QTextEdit,
+    QPushButton,
+    QApplication,
+)
 
 
 class QuickTranslatePopup(QFrame):
     """Non-intrusive popup that shows quick translation text."""
+
+    close_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,7 +40,18 @@ class QuickTranslatePopup(QFrame):
                 border-radius: 3px;
                 padding: 6px;
                 color: #d4d4d4;
-                font-size: 11px;
+                font-size: 14px;
+                font-family: Tahoma, Consolas, "Courier New", monospace;
+            }
+            QPushButton#closeButton {
+                background-color: transparent;
+                border: none;
+                color: #a0a0a0;
+                font-size: 12px;
+                padding: 0;
+            }
+            QPushButton#closeButton:hover {
+                color: #ffffff;
             }
             """
         )
@@ -41,8 +62,23 @@ class QuickTranslatePopup(QFrame):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(4)
 
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(4)
+
         self._title = QLabel("Translation")
-        layout.addWidget(self._title)
+        header.addWidget(self._title)
+        header.addStretch()
+
+        self._close_btn = QPushButton("x")
+        self._close_btn.setObjectName("closeButton")
+        self._close_btn.setToolTip("Close")
+        self._close_btn.setCursor(Qt.PointingHandCursor)
+        self._close_btn.setFixedSize(18, 18)
+        self._close_btn.clicked.connect(self._on_close_clicked)
+        header.addWidget(self._close_btn)
+
+        layout.addLayout(header)
 
         self._text = QTextEdit()
         self._text.setReadOnly(True)
@@ -82,3 +118,6 @@ class QuickTranslatePopup(QFrame):
         self.move(x, y)
         self.show()
         self.raise_()
+
+    def _on_close_clicked(self):
+        self.close_requested.emit()

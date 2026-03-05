@@ -19,6 +19,7 @@ from PDFReader.ui.status_bar import StatusBarWidget
 from PDFReader.ui.side_panel import SidePanel
 from PDFReader.ui.context_menu import TextContextMenu
 from PDFReader.ui.quick_translate_popup import QuickTranslatePopup
+from PDFReader.ui.quick_tts_popup import QuickTTSPopup
 from PDFReader.core.app import PDFReaderApp
 from PDFReader.core.ai_processor import AIProcessor
 from PDFReader.models.annotation import Annotation
@@ -58,7 +59,7 @@ class MainWindow(QMainWindow):
         self._quick_translate_anchor_global = QPoint()
         self._direct_translations: List[Tuple[str, str]] = []
         self._annotation_panel_visible = True
-        self._annotation_panel_sizes = [980, 420]
+        self._annotation_panel_sizes = [1040, 360]
         self._syncing_annotation_selection = False
         # Track which annotation is currently being processed by AI
         self._processing_annotation_id: Optional[str] = None
@@ -67,7 +68,7 @@ class MainWindow(QMainWindow):
         self._view_positions: dict = {}  # Maps file path to (page, scroll_x, scroll_y, zoom)
         # Render at higher resolution then downscale for smoother text edges.
         self._render_supersample_factor: float = 2.0
-        self._active_fit_mode: Optional[str] = None  # "width" | "page" | None
+        self._active_fit_mode: Optional[str] = "width"  # "width" | "page" | None
         # Used for wheel-based cross-page scrolling:
         # "top" -> show start of next page, "bottom" -> show tail of previous page.
         self._pending_boundary_scroll: Optional[str] = None
@@ -80,7 +81,10 @@ class MainWindow(QMainWindow):
         self._tts_update_timer.setInterval(200)
         self._tts_update_timer.timeout.connect(self._update_tts_progress)
         self._quick_translate_popup = QuickTranslatePopup()
+        self._quick_tts_popup = QuickTTSPopup()
         self._quick_translate_thread: Optional[TranslationThread] = None
+        self._tts_request_target: str = "detail"  # "detail" | "quick"
+        self._tts_playback_target: str = "detail"  # "detail" | "quick"
         self._setup_ui()
         self._setup_file_menu()
         self._setup_shortcuts()
@@ -236,6 +240,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         self._toolbar = ToolbarWidget()
+        self._toolbar.set_fit_mode("width")
         layout.addWidget(self._toolbar)
 
         # Left side panel (bookmarks + annotations tabs)
@@ -253,10 +258,10 @@ class MainWindow(QMainWindow):
         self._annotation_panel = AnnotationPanel()
         self._annotation_panel.set_list_visible(False)
         self._annotation_panel.setMinimumWidth(0)
-        self._annotation_panel.setMaximumWidth(500)
+        self._annotation_panel.setMaximumWidth(420)
         self._splitter.addWidget(self._annotation_panel)
 
-        self._splitter.setSizes([980, 420])
+        self._splitter.setSizes([1040, 360])
         self._splitter.setStretchFactor(0, 1)
         self._splitter.setStretchFactor(1, 0)
         self._splitter.setCollapsible(0, False)
@@ -268,7 +273,7 @@ class MainWindow(QMainWindow):
             "QSplitter::handle { background-color: #333333; width: 2px; }")
         self._main_splitter.addWidget(self._side_panel)
         self._main_splitter.addWidget(self._splitter)
-        self._main_splitter.setSizes([240, 1160])
+        self._main_splitter.setSizes([280, 1120])
         self._main_splitter.setStretchFactor(0, 0)
         self._main_splitter.setStretchFactor(1, 1)
         self._main_splitter.setCollapsible(0, True)
@@ -321,6 +326,7 @@ class MainWindow(QMainWindow):
         # Viewer
         self._viewer.selection_made.connect(self._on_selection_made)
         self._viewer.page_clicked.connect(self._hide_quick_translate_popup)
+        self._viewer.page_clicked.connect(self._hide_quick_tts_popup)
         self._viewer.highlight_clicked.connect(self._on_highlight_clicked)
         self._viewer.page_up_requested.connect(self._on_viewer_page_up_requested)
         self._viewer.page_down_requested.connect(self._on_viewer_page_down_requested)
@@ -360,6 +366,9 @@ class MainWindow(QMainWindow):
             self._on_add_bookmark_from_selection)
         self._context_menu.translate_to_chinese_clicked.connect(
             self._on_quick_translate_to_chinese)
+        self._context_menu.tts_play_clicked.connect(
+            self._on_quick_tts_from_selection
+        )
 
         # Side panel
         self._side_panel.bookmark_clicked.connect(self._app.go_to_page)
@@ -369,6 +378,14 @@ class MainWindow(QMainWindow):
         self._side_panel.annotation_deleted.connect(
             self._on_annotation_delete_requested
         )
+        self._quick_translate_popup.close_requested.connect(
+            self._hide_quick_translate_popup
+        )
+        self._quick_tts_popup.close_requested.connect(
+            self._hide_quick_tts_popup
+        )
+        self._quick_tts_popup.play_requested.connect(self._on_quick_tts_play)
+        self._quick_tts_popup.stop_requested.connect(self._on_quick_tts_stop)
 
         # AI processor signals
         self._ai_processor.correction_chunk.connect(self._on_correction_chunk)
@@ -468,6 +485,7 @@ class MainWindow(QMainWindow):
         self._direct_translations = []
         self._side_panel.clear_direct_translations()
         self._hide_quick_translate_popup()
+        self._hide_quick_tts_popup()
         self.setWindowTitle("PDF Reader")
     
     def _save_current_view_position(self):
@@ -682,6 +700,7 @@ class MainWindow(QMainWindow):
         self._current_selection_rect = None
         self._current_text_rects = []
         self._hide_quick_translate_popup()
+        self._hide_quick_tts_popup()
 
     def _selection_anchor_global(self, rect: tuple) -> QPoint:
         x_center = int((rect[0] + rect[2]) / 2)
@@ -693,6 +712,14 @@ class MainWindow(QMainWindow):
             self._quick_translate_thread.stop()
             self._quick_translate_thread.wait(500)
         self._quick_translate_popup.hide()
+
+    def _hide_quick_tts_popup(self, *_args):
+        if self._tts_request_target == "quick":
+            self._thread_manager.stop_tts_thread()
+        if self._tts_playback_target == "quick":
+            self._stop_tts_playback(target="quick")
+        self._quick_tts_popup.hide()
+        self._quick_tts_popup.reset_state()
 
     def _on_quick_translate_to_chinese(self, selected_text: str):
         if not self._app.is_document_loaded or not selected_text.strip():
@@ -739,6 +766,27 @@ class MainWindow(QMainWindow):
 
     def _on_quick_translation_error(self, error: str, anchor: QPoint):
         self._quick_translate_popup.set_error(anchor, error)
+
+    def _on_quick_tts_from_selection(self, selected_text: str):
+        if not self._app.is_document_loaded or not selected_text.strip():
+            return
+
+        self._tts_request_target = "quick"
+        self._stop_tts_playback()
+
+        anchor = self._quick_translate_anchor_global
+        if anchor.isNull() and self._current_selection_rect:
+            anchor = self._selection_anchor_global(self._current_selection_rect)
+
+        self._quick_tts_popup.show_generating(anchor)
+        self._ai_processor.start_tts(selected_text)
+
+    def _on_quick_tts_play(self):
+        if self._audio_player.audio_file_path:
+            self._start_tts_playback(target="quick")
+
+    def _on_quick_tts_stop(self):
+        self._stop_tts_playback(target="quick")
 
     # ─── Mark (Create Annotation) ─────────────────────────────────────────
 
@@ -1057,6 +1105,7 @@ class MainWindow(QMainWindow):
         detail = self._annotation_panel.detail_view
         corrected = detail.get_corrected_text()
         if corrected:
+            self._tts_request_target = "detail"
             # Stop any current playback
             self._stop_tts_playback()
             detail.set_status("Generating TTS audio...")
@@ -1064,65 +1113,111 @@ class MainWindow(QMainWindow):
             self._ai_processor.start_tts(corrected)
 
     def _on_tts_audio_ready(self, file_path: str):
-        """Handle TTS audio file ready — load and play immediately."""
-        detail = self._annotation_panel.detail_view
+        """Handle TTS audio file ready and start playback."""
         try:
             duration = self._audio_player.load_audio(file_path)
-            detail.show_tts_ready(duration)
-            self._start_tts_playback()
+            if self._tts_request_target == "quick":
+                anchor = self._quick_translate_anchor_global
+                if anchor.isNull() and self._current_selection_rect:
+                    anchor = self._selection_anchor_global(
+                        self._current_selection_rect
+                    )
+                self._quick_tts_popup.show_ready(anchor, duration)
+                self._start_tts_playback(target="quick")
+            else:
+                detail = self._annotation_panel.detail_view
+                detail.show_tts_ready(duration)
+                self._start_tts_playback(target="detail")
         except Exception as e:
-            detail.set_status(f"TTS playback error: {e}")
-            detail.reset_tts_player()
+            if self._tts_request_target == "quick":
+                anchor = self._quick_translate_anchor_global
+                if anchor.isNull() and self._current_selection_rect:
+                    anchor = self._selection_anchor_global(
+                        self._current_selection_rect
+                    )
+                self._quick_tts_popup.set_error(anchor, f"TTS playback error: {e}")
+            else:
+                detail = self._annotation_panel.detail_view
+                detail.set_status(f"TTS playback error: {e}")
+                detail.reset_tts_player()
 
     def _on_tts_error(self, error: str):
-        detail = self._annotation_panel.detail_view
-        detail.set_status(f"TTS error: {error}")
-        detail.reset_tts_player()
+        if self._tts_request_target == "quick":
+            anchor = self._quick_translate_anchor_global
+            if anchor.isNull() and self._current_selection_rect:
+                anchor = self._selection_anchor_global(self._current_selection_rect)
+            self._quick_tts_popup.set_error(anchor, f"TTS error: {error}")
+        else:
+            detail = self._annotation_panel.detail_view
+            detail.set_status(f"TTS error: {error}")
+            detail.reset_tts_player()
 
     def _on_tts_play(self):
         """Play TTS audio from the beginning."""
         if self._audio_player.audio_file_path:
-            self._start_tts_playback()
+            self._start_tts_playback(target="detail")
 
     def _on_tts_stop(self):
         """Stop TTS playback."""
-        self._stop_tts_playback()
+        self._stop_tts_playback(target="detail")
 
-    def _start_tts_playback(self):
+    def _start_tts_playback(self, target: str = "detail"):
         """Start file-based audio playback."""
-        detail = self._annotation_panel.detail_view
+        self._tts_playback_target = target
         if self._audio_player.play():
-            detail.set_tts_playing(True)
-            detail.set_status("Playing...")
+            if target == "quick":
+                self._quick_tts_popup.set_playing(True)
+                self._quick_tts_popup.set_status("Playing...")
+            else:
+                detail = self._annotation_panel.detail_view
+                detail.set_tts_playing(True)
+                detail.set_status("Playing...")
             self._tts_update_timer.start()
 
-    def _stop_tts_playback(self):
+    def _stop_tts_playback(self, target: Optional[str] = None):
         """Stop file-based audio playback and reset UI."""
+        active_target = target or self._tts_playback_target
         self._audio_player.stop()
         self._tts_update_timer.stop()
-        detail = self._annotation_panel.detail_view
-        detail.set_tts_playing(False)
         length = self._audio_player.audio_length
-        detail.update_tts_progress(0, length if length > 0 else 100)
-        detail.set_status("Ready")
+        if active_target == "quick":
+            self._quick_tts_popup.set_playing(False)
+            self._quick_tts_popup.update_progress(0, length if length > 0 else 100)
+            self._quick_tts_popup.set_status("Ready")
+        else:
+            detail = self._annotation_panel.detail_view
+            detail.set_tts_playing(False)
+            detail.update_tts_progress(0, length if length > 0 else 100)
+            detail.set_status("Ready")
 
     def _update_tts_progress(self):
         """Timer callback to update TTS progress bar."""
-        detail = self._annotation_panel.detail_view
         self._audio_player.update_position()
         pos = self._audio_player.current_position
         length = self._audio_player.audio_length
 
         if length > 0:
-            detail.update_tts_progress(int(pos), int(length))
+            if self._tts_playback_target == "quick":
+                self._quick_tts_popup.update_progress(int(pos), int(length))
+            else:
+                detail = self._annotation_panel.detail_view
+                detail.update_tts_progress(int(pos), int(length))
 
         # Check if playback finished
         if not self._audio_player.is_busy():
             self._tts_update_timer.stop()
             self._audio_player.is_playing = False
-            detail.set_tts_playing(False)
-            detail.update_tts_progress(0, int(length) if length > 0 else 100)
-            detail.set_status("Ready")
+            if self._tts_playback_target == "quick":
+                self._quick_tts_popup.set_playing(False)
+                self._quick_tts_popup.update_progress(
+                    0, int(length) if length > 0 else 100
+                )
+                self._quick_tts_popup.set_status("Ready")
+            else:
+                detail = self._annotation_panel.detail_view
+                detail.set_tts_playing(False)
+                detail.update_tts_progress(0, int(length) if length > 0 else 100)
+                detail.set_status("Ready")
 
     def _on_tts_settings(self):
         """Show TTS settings dialog."""
@@ -1216,3 +1311,4 @@ class MainWindow(QMainWindow):
         self._ai_processor.stop_all()
         self._app.close_document()
         event.accept()
+

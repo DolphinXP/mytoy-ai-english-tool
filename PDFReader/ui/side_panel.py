@@ -433,7 +433,7 @@ class SidePanel(QWidget):
 
         layout.addWidget(self._tabs)
 
-        self.setMinimumWidth(160)
+        self.setMinimumWidth(280)
         self.setMaximumWidth(500)
 
     def _toggle_collapse(self):
@@ -449,7 +449,7 @@ class SidePanel(QWidget):
             self._collapse_btn.setText("Hide")
             self._collapse_btn.setToolTip("Hide side panel")
             self._collapse_btn.setIcon(_create_text_icon("<", 20, "#d4d4d4"))
-            self.setMinimumWidth(160)
+            self.setMinimumWidth(280)
             self.setMaximumWidth(500)
         self.collapse_toggled.emit(self._collapsed)
 

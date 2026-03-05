@@ -215,7 +215,9 @@ class AnnotationDetailView(QWidget):
         corrected_header.addStretch()
         content_layout.addLayout(corrected_header)
 
-        self._corrected_display = self._create_text_display(100)
+        self._corrected_display = self._create_text_display(
+            100, font_size=14, font_family="Tahoma"
+        )
         content_layout.addWidget(self._corrected_display)
 
         # Translation
@@ -235,7 +237,9 @@ class AnnotationDetailView(QWidget):
         trans_header.addStretch()
         content_layout.addLayout(trans_header)
 
-        self._translated_display = self._create_text_display(120)
+        self._translated_display = self._create_text_display(
+            120, font_size=14, font_family="Tahoma"
+        )
         content_layout.addWidget(self._translated_display)
 
         # Explanation (stretches to fill remaining space, renders markdown)
@@ -368,19 +372,22 @@ class AnnotationDetailView(QWidget):
             QPushButton:disabled { background-color: #2d2d2d; color: #7f7f7f; }
         """
 
-    def _create_text_display(self, max_height: int) -> QTextEdit:
+    def _create_text_display(
+        self, max_height: int, font_size: int = 12, font_family: str = "Segoe UI"
+    ) -> QTextEdit:
         display = QTextEdit()
         display.setReadOnly(True)
         display.setMaximumHeight(max_height)
-        display.setStyleSheet("""
-            QTextEdit {
+        display.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: #1e1e1e;
                 border: 1px solid #3c3c3c;
                 border-radius: 4px;
                 padding: 6px;
-                font-size: 12px;
+                font-size: {font_size}px;
+                font-family: '{font_family}';
                 color: #d4d4d4;
-            }
+            }}
         """)
         return display
 
