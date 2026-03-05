@@ -26,6 +26,7 @@ from PDFReader.models.annotation import Annotation
 from core.thread_manager import ThreadManager
 from services.audio.file_player import FileAudioPlayer
 from services.api.translation import TranslationThread
+from services.api.text_correction import TextCorrectionThread
 
 _parent_dir = str(Path(__file__).parent.parent.parent)
 if _parent_dir not in sys.path:
@@ -83,6 +84,8 @@ class MainWindow(QMainWindow):
         self._quick_translate_popup = QuickTranslatePopup()
         self._quick_tts_popup = QuickTTSPopup()
         self._quick_translate_thread: Optional[TranslationThread] = None
+        self._quick_translate_correction_thread: Optional[TextCorrectionThread] = None
+        self._quick_tts_correction_thread: Optional[TextCorrectionThread] = None
         self._tts_request_target: str = "detail"  # "detail" | "quick"
         self._tts_playback_target: str = "detail"  # "detail" | "quick"
         self._setup_ui()
@@ -708,12 +711,21 @@ class MainWindow(QMainWindow):
         return self._viewer.map_page_to_global(QPoint(x_center, y_top))
 
     def _hide_quick_translate_popup(self, *_args):
+        if (
+            self._quick_translate_correction_thread
+            and self._quick_translate_correction_thread.isRunning()
+        ):
+            self._quick_translate_correction_thread.stop()
+            self._quick_translate_correction_thread.wait(500)
         if self._quick_translate_thread and self._quick_translate_thread.isRunning():
             self._quick_translate_thread.stop()
             self._quick_translate_thread.wait(500)
         self._quick_translate_popup.hide()
 
     def _hide_quick_tts_popup(self, *_args):
+        if self._quick_tts_correction_thread and self._quick_tts_correction_thread.isRunning():
+            self._quick_tts_correction_thread.stop()
+            self._quick_tts_correction_thread.wait(500)
         if self._tts_request_target == "quick":
             self._thread_manager.stop_tts_thread()
         if self._tts_playback_target == "quick":
@@ -725,7 +737,13 @@ class MainWindow(QMainWindow):
         if not self._app.is_document_loaded or not selected_text.strip():
             return
 
-        # Stop previous quick translation task.
+        # Stop previous quick translation tasks.
+        if (
+            self._quick_translate_correction_thread
+            and self._quick_translate_correction_thread.isRunning()
+        ):
+            self._quick_translate_correction_thread.stop()
+            self._quick_translate_correction_thread.wait(500)
         if self._quick_translate_thread and self._quick_translate_thread.isRunning():
             self._quick_translate_thread.stop()
             self._quick_translate_thread.wait(500)
@@ -734,6 +752,39 @@ class MainWindow(QMainWindow):
         if anchor.isNull() and self._current_selection_rect:
             anchor = self._selection_anchor_global(self._current_selection_rect)
 
+        self._quick_translate_popup.show_correcting(anchor)
+
+        correction_thread = TextCorrectionThread(selected_text)
+        correction_thread.correction_done.connect(
+            lambda corrected, src=selected_text, a=anchor: self._start_quick_translation(
+                src, corrected, a
+            )
+        )
+        correction_thread.correction_error.connect(
+            lambda _error: None
+        )
+        self._quick_translate_correction_thread = correction_thread
+        correction_thread.start()
+
+    def _on_quick_translation_done(
+        self, source_text: str, corrected_text: str, translated_text: str, anchor: QPoint
+    ):
+        self._quick_translate_popup.set_result(anchor, translated_text)
+        display_source = corrected_text.strip() or source_text
+        self._direct_translations.insert(0, (display_source, translated_text))
+        self._direct_translations = self._direct_translations[:200]
+        self._side_panel.add_direct_translation(display_source, translated_text)
+
+    def _on_quick_translation_error(self, error: str, anchor: QPoint):
+        self._quick_translate_popup.set_error(anchor, error)
+
+    def _start_quick_translation(
+        self, source_text: str, corrected_text: str, anchor: QPoint
+    ):
+        if not self._app.is_document_loaded:
+            return
+
+        text_to_translate = (corrected_text or "").strip() or source_text
         self._quick_translate_popup.show_loading(anchor)
 
         page_text = self._app.pdf_service.get_text(self._app.current_page)
@@ -742,12 +793,12 @@ class MainWindow(QMainWindow):
             context_text = context_text[:1200]
 
         thread = TranslationThread(
-            text_to_translate=selected_text,
+            text_to_translate=text_to_translate,
             context_text=context_text,
         )
         thread.translation_done.connect(
-            lambda result, src=selected_text, a=anchor: self._on_quick_translation_done(
-                src, result, a
+            lambda result, src=source_text, corr=text_to_translate, a=anchor: self._on_quick_translation_done(
+                src, corr, result, a
             )
         )
         thread.translation_error.connect(
@@ -756,20 +807,13 @@ class MainWindow(QMainWindow):
         self._quick_translate_thread = thread
         thread.start()
 
-    def _on_quick_translation_done(
-        self, source_text: str, translated_text: str, anchor: QPoint
-    ):
-        self._quick_translate_popup.set_result(anchor, translated_text)
-        self._direct_translations.insert(0, (source_text, translated_text))
-        self._direct_translations = self._direct_translations[:200]
-        self._side_panel.add_direct_translation(source_text, translated_text)
-
-    def _on_quick_translation_error(self, error: str, anchor: QPoint):
-        self._quick_translate_popup.set_error(anchor, error)
-
     def _on_quick_tts_from_selection(self, selected_text: str):
         if not self._app.is_document_loaded or not selected_text.strip():
             return
+
+        if self._quick_tts_correction_thread and self._quick_tts_correction_thread.isRunning():
+            self._quick_tts_correction_thread.stop()
+            self._quick_tts_correction_thread.wait(500)
 
         self._tts_request_target = "quick"
         self._stop_tts_playback()
@@ -779,7 +823,15 @@ class MainWindow(QMainWindow):
             anchor = self._selection_anchor_global(self._current_selection_rect)
 
         self._quick_tts_popup.show_generating(anchor)
-        self._ai_processor.start_tts(selected_text)
+        self._quick_tts_popup.set_status("Correcting text...")
+
+        correction_thread = TextCorrectionThread(selected_text)
+        correction_thread.correction_done.connect(
+            lambda corrected: self._start_quick_tts(corrected, selected_text)
+        )
+        correction_thread.correction_error.connect(lambda _error: None)
+        self._quick_tts_correction_thread = correction_thread
+        correction_thread.start()
 
     def _on_quick_tts_play(self):
         if self._audio_player.audio_file_path:
@@ -787,6 +839,11 @@ class MainWindow(QMainWindow):
 
     def _on_quick_tts_stop(self):
         self._stop_tts_playback(target="quick")
+
+    def _start_quick_tts(self, corrected_text: str, fallback_text: str):
+        text_to_speak = (corrected_text or "").strip() or fallback_text
+        self._quick_tts_popup.set_status("Generating TTS audio...")
+        self._ai_processor.start_tts(text_to_speak)
 
     # ─── Mark (Create Annotation) ─────────────────────────────────────────
 
@@ -1306,6 +1363,7 @@ class MainWindow(QMainWindow):
             self._quick_translate_thread.stop()
             self._quick_translate_thread.wait(500)
         self._hide_quick_translate_popup()
+        self._hide_quick_tts_popup()
         self._tts_update_timer.stop()
         self._audio_player.cleanup()
         self._ai_processor.stop_all()

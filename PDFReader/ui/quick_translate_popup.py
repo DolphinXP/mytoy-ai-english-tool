@@ -90,6 +90,11 @@ class QuickTranslatePopup(QFrame):
         self._text.setPlainText("Translating...")
         self._show_above(anchor_global)
 
+    def show_correcting(self, anchor_global: QPoint):
+        self._title.setText("Translation")
+        self._text.setPlainText("Correcting...")
+        self._show_above(anchor_global)
+
     def set_result(self, anchor_global: QPoint, text: str):
         self._title.setText("Translation (Chinese)")
         self._text.setPlainText(text.strip())

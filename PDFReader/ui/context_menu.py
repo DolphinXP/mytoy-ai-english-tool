@@ -63,11 +63,10 @@ class TextContextMenu(QObject):
         self._add_bookmark_action.triggered.connect(self._on_add_bookmark)
         self._menu.addAction(self._add_bookmark_action)
 
-        # TTS submenu
-        self._tts_menu = self._menu.addMenu("TTS")
-        self._tts_play_action = QAction("Play", self._tts_menu)
-        self._tts_play_action.triggered.connect(self._on_tts_play)
-        self._tts_menu.addAction(self._tts_play_action)
+        # TTS action
+        self._tts_action = QAction("TTS", self._menu)
+        self._tts_action.triggered.connect(self._on_tts_play)
+        self._menu.addAction(self._tts_action)
 
 
     def show_at(self, pos: QPoint, text: str):
@@ -77,7 +76,7 @@ class TextContextMenu(QObject):
         self._mark_action.setEnabled(has_text)
         self._add_bookmark_action.setEnabled(has_text)
         self._translate_to_chinese_action.setEnabled(has_text)
-        self._tts_menu.setEnabled(has_text)
+        self._tts_action.setEnabled(has_text)
         self._menu.popup(pos)
 
     def _on_mark(self):
