@@ -111,7 +111,9 @@ class PDFReaderApp(QObject):
         self._annotation_manager.set_document(file_path)
 
         self.document_loaded.emit(file_path)
-        self.page_changed.emit(0)
+        # document_loaded handlers may restore a saved page, so emit the
+        # effective current page instead of always forcing page 0.
+        self.page_changed.emit(self._current_page)
 
         return True
 
