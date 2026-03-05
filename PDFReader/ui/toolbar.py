@@ -23,6 +23,7 @@ class ToolbarWidget(QWidget):
     zoom_out_clicked = Signal()
     zoom_reset_clicked = Signal()
     zoom_level_changed = Signal(float)
+    toggle_annotations_clicked = Signal()
 
     def __init__(self, parent=None):
         """Initialize toolbar."""
@@ -119,7 +120,8 @@ class ToolbarWidget(QWidget):
         layout.addWidget(self._page_spin)
 
         self._page_count_label = QLabel("/ 0")
-        self._page_count_label.setStyleSheet("background: transparent; border: none;")
+        self._page_count_label.setStyleSheet(
+            "background: transparent; border: none;")
         layout.addWidget(self._page_count_label)
 
         self._next_btn = QPushButton("▶")
@@ -146,7 +148,8 @@ class ToolbarWidget(QWidget):
         self._zoom_combo = QComboBox()
         self._zoom_combo.setEditable(True)
         self._zoom_combo.setFixedWidth(80)
-        self._zoom_combo.addItems(["50%", "75%", "100%", "125%", "150%", "200%", "300%"])
+        self._zoom_combo.addItems(
+            ["50%", "75%", "100%", "125%", "150%", "200%", "300%"])
         self._zoom_combo.setCurrentText("100%")
         self._zoom_combo.currentTextChanged.connect(self._on_zoom_text_changed)
         layout.addWidget(self._zoom_combo)
@@ -163,6 +166,33 @@ class ToolbarWidget(QWidget):
         layout.addWidget(self._zoom_reset_btn)
 
         layout.addStretch()
+
+        # Toggle annotation panel button
+        self._toggle_annotations_btn = QPushButton("📝 Annotations")
+        self._toggle_annotations_btn.setToolTip("Toggle annotation panel")
+        self._toggle_annotations_btn.setCheckable(True)
+        self._toggle_annotations_btn.setChecked(True)
+        self._toggle_annotations_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 13px;
+                color: #cccccc;
+            }
+            QPushButton:hover {
+                background-color: #3c3c3c;
+                border-color: #555555;
+            }
+            QPushButton:checked {
+                background-color: #0078d4;
+                color: #ffffff;
+            }
+        """)
+        self._toggle_annotations_btn.clicked.connect(
+            self.toggle_annotations_clicked.emit)
+        layout.addWidget(self._toggle_annotations_btn)
 
         # Initially disable navigation
         self._set_navigation_enabled(False)

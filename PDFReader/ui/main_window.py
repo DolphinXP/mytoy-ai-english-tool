@@ -45,6 +45,8 @@ class MainWindow(QMainWindow):
         self._current_selection_rect = None
         self._current_text_rects = []
         self._current_selected_text = ""
+        self._annotation_panel_visible = True
+        self._annotation_panel_sizes = [980, 420]
         self._setup_ui()
         self._setup_shortcuts()
         self._connect_signals()
@@ -75,23 +77,25 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self._side_panel)
 
         # Splitter for viewer and annotation panel
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setStyleSheet(
+        self._splitter = QSplitter(Qt.Horizontal)
+        self._splitter.setStyleSheet(
             "QSplitter::handle { background-color: #333333; width: 2px; }")
 
         self._viewer = PDFViewerWidget()
-        splitter.addWidget(self._viewer)
+        self._splitter.addWidget(self._viewer)
 
         self._annotation_panel = AnnotationPanel()
-        self._annotation_panel.setMinimumWidth(280)
+        self._annotation_panel.setMinimumWidth(0)
         self._annotation_panel.setMaximumWidth(400)
-        splitter.addWidget(self._annotation_panel)
+        self._splitter.addWidget(self._annotation_panel)
 
-        splitter.setSizes([980, 420])
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 0)
+        self._splitter.setSizes([980, 420])
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 0)
+        self._splitter.setCollapsible(0, False)
+        self._splitter.setCollapsible(1, True)
 
-        content_layout.addWidget(splitter, 1)
+        content_layout.addWidget(self._splitter, 1)
         layout.addLayout(content_layout, 1)
 
         self._status_bar = StatusBarWidget()
@@ -125,6 +129,8 @@ class MainWindow(QMainWindow):
         self._toolbar.zoom_out_clicked.connect(self._app.zoom_out)
         self._toolbar.zoom_reset_clicked.connect(self._app.reset_zoom)
         self._toolbar.zoom_level_changed.connect(self._app.set_zoom)
+        self._toolbar.toggle_annotations_clicked.connect(
+            self._toggle_annotation_panel)
 
         # App
         self._app.document_loaded.connect(self._on_document_loaded)
@@ -285,6 +291,19 @@ class MainWindow(QMainWindow):
 
     def open_file(self, file_path: str):
         self._app.open_document(file_path)
+
+    def _toggle_annotation_panel(self):
+        """Toggle the annotation panel visibility."""
+        if self._annotation_panel_visible:
+            # Save current sizes before collapsing
+            self._annotation_panel_sizes = self._splitter.sizes()
+            self._annotation_panel.hide()
+            self._annotation_panel_visible = False
+        else:
+            # Restore the panel
+            self._annotation_panel.show()
+            self._splitter.setSizes(self._annotation_panel_sizes)
+            self._annotation_panel_visible = True
 
     # AI Processing
     def _on_translate_selection(self, text: str):
