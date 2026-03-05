@@ -7,10 +7,9 @@ from PySide6.QtGui import QAction
 
 
 class TextContextMenu(QObject):
-    """Context menu with Translation and AI Explain options."""
+    """Context menu with Mark option for creating annotations."""
 
-    translate_clicked = Signal(str)  # selected_text
-    explain_clicked = Signal(str)  # selected_text
+    mark_clicked = Signal(str)  # selected_text
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -42,25 +41,16 @@ class TextContextMenu(QObject):
             }
         """)
 
-        # Translation action
-        self._translate_action = QAction("🌐 Translation", self._menu)
-        self._translate_action.triggered.connect(self._on_translate)
-        self._menu.addAction(self._translate_action)
-
-        # AI Explain action
-        self._explain_action = QAction("💡 AI Explain", self._menu)
-        self._explain_action.triggered.connect(self._on_explain)
-        self._menu.addAction(self._explain_action)
+        # Mark action - creates annotation with selected text
+        self._mark_action = QAction("📌 Mark", self._menu)
+        self._mark_action.triggered.connect(self._on_mark)
+        self._menu.addAction(self._mark_action)
 
     def show_at(self, pos: QPoint, text: str):
         """Show context menu at position with selected text."""
         self._selected_text = text
         self._menu.popup(pos)
 
-    def _on_translate(self):
+    def _on_mark(self):
         if self._selected_text:
-            self.translate_clicked.emit(self._selected_text)
-
-    def _on_explain(self):
-        if self._selected_text:
-            self.explain_clicked.emit(self._selected_text)
+            self.mark_clicked.emit(self._selected_text)

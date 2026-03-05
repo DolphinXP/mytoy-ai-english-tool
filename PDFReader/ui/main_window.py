@@ -3,7 +3,6 @@ from core.thread_manager import ThreadManager
 from PDFReader.models.annotation import Annotation
 from PDFReader.core.ai_processor import AIProcessor
 from PDFReader.core.app import PDFReaderApp
-from PDFReader.ui.result_panel import ResultPanel
 from PDFReader.ui.context_menu import TextContextMenu
 from PDFReader.ui.side_panel import SidePanel
 from PDFReader.ui.status_bar import StatusBarWidget
@@ -47,6 +46,8 @@ class MainWindow(QMainWindow):
         self._current_selected_text = ""
         self._annotation_panel_visible = True
         self._annotation_panel_sizes = [980, 420]
+        # Track which annotation is currently being processed by AI
+        self._processing_annotation_id: Optional[str] = None
         self._setup_ui()
         self._setup_shortcuts()
         self._connect_signals()
@@ -86,7 +87,7 @@ class MainWindow(QMainWindow):
 
         self._annotation_panel = AnnotationPanel()
         self._annotation_panel.setMinimumWidth(0)
-        self._annotation_panel.setMaximumWidth(400)
+        self._annotation_panel.setMaximumWidth(500)
         self._splitter.addWidget(self._annotation_panel)
 
         self._splitter.setSizes([980, 420])
@@ -101,7 +102,7 @@ class MainWindow(QMainWindow):
         self._status_bar = StatusBarWidget()
         layout.addWidget(self._status_bar)
 
-        # Context menu (replaces popup window)
+        # Context menu for text selection
         self._context_menu = TextContextMenu(self)
 
     def _setup_shortcuts(self):
@@ -141,6 +142,7 @@ class MainWindow(QMainWindow):
 
         # Viewer
         self._viewer.selection_made.connect(self._on_selection_made)
+        self._viewer.highlight_clicked.connect(self._on_highlight_clicked)
         self._viewer.page_up_requested.connect(self._app.previous_page)
         self._viewer.page_down_requested.connect(self._app.next_page)
         self._viewer.zoom_in_requested.connect(self._app.zoom_in)
@@ -152,22 +154,48 @@ class MainWindow(QMainWindow):
         self._annotation_panel.annotation_deleted.connect(
             self._on_annotation_delete_requested)
 
+        # Annotation panel detail view actions
+        self._annotation_panel.copy_clicked.connect(self._on_copy_result)
+        self._annotation_panel.retranslate_clicked.connect(
+            self._on_retranslate)
+        self._annotation_panel.explain_clicked.connect(self._on_explain)
+        self._annotation_panel.tts_clicked.connect(self._on_tts)
+        self._annotation_panel.regenerate_clicked.connect(self._on_regenerate)
+
         # Annotation manager
         self._app.annotation_manager.annotations_loaded.connect(
             self._on_annotations_loaded)
         self._app.annotation_manager.annotation_created.connect(
             self._on_annotation_created)
+        self._app.annotation_manager.annotation_updated.connect(
+            self._on_annotation_updated)
         self._app.annotation_manager.annotation_deleted.connect(
             self._on_annotation_deleted)
 
-        # Context menu
-        self._context_menu.translate_clicked.connect(
-            self._on_translate_selection)
-        self._context_menu.explain_clicked.connect(self._on_explain_selection)
+        # Context menu — Mark action
+        self._context_menu.mark_clicked.connect(self._on_mark_selection)
 
         # Side panel
         self._side_panel.bookmark_clicked.connect(self._app.go_to_page)
         self._side_panel.history_clicked.connect(self._on_history_clicked)
+
+        # AI processor signals
+        self._ai_processor.correction_chunk.connect(self._on_correction_chunk)
+        self._ai_processor.correction_done.connect(self._on_correction_done)
+        self._ai_processor.correction_error.connect(self._on_correction_error)
+        self._ai_processor.translation_chunk.connect(
+            self._on_translation_chunk)
+        self._ai_processor.translation_done.connect(self._on_translation_done)
+        self._ai_processor.translation_error.connect(
+            self._on_translation_error)
+        self._ai_processor.explain_chunk.connect(self._on_explain_chunk)
+        self._ai_processor.explain_done.connect(self._on_explain_done)
+        self._ai_processor.tts_finished.connect(
+            lambda: self._annotation_panel.detail_view.set_status("Ready"))
+        self._ai_processor.tts_error.connect(
+            lambda e: self._annotation_panel.detail_view.set_status(f"TTS error: {e}"))
+
+    # ─── File / Document ──────────────────────────────────────────────────
 
     def _on_open_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -182,7 +210,6 @@ class MainWindow(QMainWindow):
         self._status_bar.set_document_info(file_path, self._app.page_count)
         self.setWindowTitle(f"PDF Reader - {Path(file_path).name}")
         self._render_current_page()
-        # Load bookmarks
         bookmarks = self._app.pdf_service.get_bookmarks()
         self._side_panel.set_bookmarks(bookmarks)
 
@@ -192,6 +219,11 @@ class MainWindow(QMainWindow):
         self._status_bar.set_document_info("", 0)
         self.setWindowTitle("PDF Reader")
 
+    def open_file(self, file_path: str):
+        self._app.open_document(file_path)
+
+    # ─── Page & Zoom ──────────────────────────────────────────────────────
+
     def _on_page_changed(self, page: int):
         self._toolbar.set_current_page(page)
         self._clear_selection()
@@ -199,8 +231,8 @@ class MainWindow(QMainWindow):
         self._update_page_highlights()
         if self._app.is_document_loaded:
             doc_path = self._app.pdf_service.document_path
-            self._side_panel.add_history(doc_path, page, Path(
-                doc_path).stem if doc_path else "Unknown")
+            self._side_panel.add_history(
+                doc_path, page, Path(doc_path).stem if doc_path else "Unknown")
 
     def _on_zoom_changed(self, zoom: float):
         self._toolbar.set_zoom_level(zoom)
@@ -217,12 +249,16 @@ class MainWindow(QMainWindow):
             self._app.current_page, self._app.zoom_level)
         if pixmap_data:
             from PySide6.QtGui import QImage
-            img = QImage(pixmap_data.samples, pixmap_data.width,
-                         pixmap_data.height, pixmap_data.stride, QImage.Format_RGB888)
+            img = QImage(
+                pixmap_data.samples, pixmap_data.width,
+                pixmap_data.height, pixmap_data.stride,
+                QImage.Format_RGB888)
             words = self._app.pdf_service.get_text_words(
                 self._app.current_page)
             self._viewer.display_pixmap(
                 QPixmap.fromImage(img), self._app.zoom_level, words)
+
+    # ─── Selection ────────────────────────────────────────────────────────
 
     def _on_selection_made(self, rect: tuple, text: str, text_rects: list):
         if not text:
@@ -240,31 +276,52 @@ class MainWindow(QMainWindow):
         self._current_selection_rect = None
         self._current_text_rects = []
 
-    def _on_history_clicked(self, doc_path: str, page: int):
-        if self._app.pdf_service.document_path != doc_path:
-            self._app.open_document(doc_path)
-        self._app.go_to_page(page)
+    # ─── Mark (Create Annotation) ─────────────────────────────────────────
 
-    # Annotation methods
-    def _on_annotations_loaded(self, annotations: list):
-        self._annotation_panel.set_annotations(annotations)
-        self._status_bar.set_annotation_count(len(annotations))
+    def _on_mark_selection(self, text: str):
+        """Handle Mark action from context menu: create annotation and start AI processing."""
+        if not self._app.is_document_loaded or not text:
+            return
+
+        # Ensure annotation panel is visible
+        if not self._annotation_panel_visible:
+            self._toggle_annotation_panel()
+
+        # Create annotation
+        annotation = self._app.annotation_manager.create(
+            page_number=self._app.current_page,
+            selected_text=text,
+            text_rects=self._current_text_rects,
+        )
+
+        # Select it in the panel and start AI processing
+        self._processing_annotation_id = annotation.id
+        self._annotation_panel.select_annotation(annotation.id)
+
+        # Show processing state in detail view
+        detail = self._annotation_panel.detail_view
+        detail.set_original_text(text)
+        detail.start_correction()
+
+        # Start AI correction → translation pipeline
+        self._ai_processor.start_correction(text)
+
+        # Update highlights
         self._update_page_highlights()
+        self._clear_selection()
 
-    def _on_annotation_created(self, annotation: Annotation):
-        self._annotation_panel.add_annotation(annotation)
-        self._update_annotation_status()
+    # ─── Highlight Click ──────────────────────────────────────────────────
 
-    def _on_annotation_deleted(self, annotation_id: str):
-        self._annotation_panel.remove_annotation(annotation_id)
-        self._update_annotation_status()
+    def _on_highlight_clicked(self, annotation_id: str):
+        """Handle click on a highlighted annotation area."""
+        if not self._annotation_panel_visible:
+            self._toggle_annotation_panel()
+        self._annotation_panel.select_annotation(annotation_id)
 
-    def _update_annotation_status(self):
-        self._status_bar.set_annotation_count(
-            self._app.annotation_manager.get_count())
-        self._update_page_highlights()
+    # ─── Annotation Panel Events ──────────────────────────────────────────
 
     def _on_annotation_selected(self, annotation_id: str):
+        """Handle annotation selection in the panel."""
         annotation = self._app.annotation_manager.get(annotation_id)
         if annotation and annotation.page_number != self._app.current_page:
             self._app.go_to_page(annotation.page_number)
@@ -277,151 +334,168 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             self._app.annotation_manager.delete(annotation_id)
 
+    def _on_annotations_loaded(self, annotations: list):
+        self._annotation_panel.set_annotations(annotations)
+        self._status_bar.set_annotation_count(len(annotations))
+        self._update_page_highlights()
+
+    def _on_annotation_created(self, annotation: Annotation):
+        self._annotation_panel.add_annotation(annotation)
+        self._update_annotation_status()
+
+    def _on_annotation_updated(self, annotation: Annotation):
+        self._annotation_panel.update_annotation(annotation)
+
+    def _on_annotation_deleted(self, annotation_id: str):
+        self._annotation_panel.remove_annotation(annotation_id)
+        self._update_annotation_status()
+
+    def _update_annotation_status(self):
+        self._status_bar.set_annotation_count(
+            self._app.annotation_manager.get_count())
+        self._update_page_highlights()
+
     def _update_page_highlights(self):
+        """Update yellow highlights on the page for all annotations."""
         if not self._app.is_document_loaded:
             return
         annotations = self._app.annotation_manager.get_by_page(
             self._app.current_page)
         highlights = []
         for ann in annotations:
-            color = QColor(255, 235, 59)
+            color = QColor(255, 235, 59)  # Yellow
             for rect in ann.text_rects:
-                highlights.append((tuple(rect), color))
+                highlights.append((tuple(rect), color, ann.id))
         self._viewer.set_highlights(highlights)
 
-    def open_file(self, file_path: str):
-        self._app.open_document(file_path)
+    # ─── Toggle Panel ─────────────────────────────────────────────────────
 
     def _toggle_annotation_panel(self):
-        """Toggle the annotation panel visibility."""
         if self._annotation_panel_visible:
-            # Save current sizes before collapsing
             self._annotation_panel_sizes = self._splitter.sizes()
             self._annotation_panel.hide()
             self._annotation_panel_visible = False
         else:
-            # Restore the panel
             self._annotation_panel.show()
             self._splitter.setSizes(self._annotation_panel_sizes)
             self._annotation_panel_visible = True
 
-    # AI Processing
-    def _on_translate_selection(self, text: str):
-        self._current_selected_text = text
-        self._show_result_panel()
-        self._result_panel.set_original_text(text)
-        self._result_panel.start_correction()
-        self._ai_processor.start_correction(text)
+    def _on_history_clicked(self, doc_path: str, page: int):
+        if self._app.pdf_service.document_path != doc_path:
+            self._app.open_document(doc_path)
+        self._app.go_to_page(page)
 
-    def _on_explain_selection(self, text: str):
-        self._current_selected_text = text
-        self._show_result_panel()
-        self._result_panel.set_original_text(text)
-        self._result_panel.start_explanation()
-        self._ai_processor.start_explanation(text)
+    # ─── AI Processing Pipeline ───────────────────────────────────────────
 
-    def _show_result_panel(self):
-        if not hasattr(self, '_result_panel') or not self._result_panel:
-            self._create_result_panel()
-        self._result_panel.show()
-        self._position_result_panel()
-
-    def _create_result_panel(self):
-        self._result_panel = ResultPanel(self)
-        self._result_panel.setFixedWidth(380)
-        self._result_panel.setMinimumHeight(500)
-        self._result_panel.copy_clicked.connect(self._on_copy_result)
-        self._result_panel.retranslate_clicked.connect(self._on_retranslate)
-        self._result_panel.explain_clicked.connect(self._on_explain)
-        self._result_panel.tts_clicked.connect(self._on_tts)
-        self._result_panel.regenerate_clicked.connect(self._on_regenerate)
-        self._result_panel.close_clicked.connect(self._close_result_panel)
-        # Connect AI processor signals
-        self._ai_processor.correction_chunk.connect(
-            self._result_panel.append_corrected_chunk)
-        self._ai_processor.correction_done.connect(self._on_correction_done)
-        self._ai_processor.correction_error.connect(self._on_correction_error)
-        self._ai_processor.translation_chunk.connect(
-            self._result_panel.append_translated_chunk)
-        self._ai_processor.translation_done.connect(self._on_translation_done)
-        self._ai_processor.translation_error.connect(
-            self._on_translation_error)
-        self._ai_processor.explain_chunk.connect(
-            self._result_panel.append_explain_chunk)
-        self._ai_processor.explain_done.connect(self._on_explain_done)
-        self._ai_processor.tts_finished.connect(
-            lambda: self._result_panel.set_status("Ready"))
-        self._ai_processor.tts_error.connect(
-            lambda e: self._result_panel.set_status(f"TTS error: {e}"))
-
-    def _position_result_panel(self):
-        if hasattr(self, '_result_panel') and self._result_panel:
-            self._result_panel.move(
-                self.width() - self._result_panel.width() - 20, 80)
-
-    def _close_result_panel(self):
-        if hasattr(self, '_result_panel') and self._result_panel:
-            self._result_panel.hide()
-            self._ai_processor.stop_all()
+    def _on_correction_chunk(self, chunk: str):
+        self._annotation_panel.detail_view.append_corrected_chunk(chunk)
 
     def _on_correction_done(self, corrected_text: str):
-        self._result_panel.set_corrected_text(corrected_text)
-        self._result_panel.start_translation()
+        detail = self._annotation_panel.detail_view
+        detail.set_corrected_text(corrected_text)
+
+        # Save to annotation
+        if self._processing_annotation_id:
+            self._app.annotation_manager.update(
+                self._processing_annotation_id,
+                corrected_text=corrected_text)
+
+        # Start translation
+        detail.start_translation()
         self._ai_processor.start_translation(corrected_text)
 
     def _on_correction_error(self, error: str):
-        self._result_panel.set_status(f"Correction error: {error}")
-        self._result_panel.start_translation()
-        self._ai_processor.start_translation(self._current_selected_text)
+        detail = self._annotation_panel.detail_view
+        detail.set_status(f"Correction error: {error}")
+        # Fall back to translating original text
+        detail.start_translation()
+        text = self._current_selected_text or detail._original_display.toPlainText()
+        self._ai_processor.start_translation(text)
+
+    def _on_translation_chunk(self, chunk: str):
+        self._annotation_panel.detail_view.append_translated_chunk(chunk)
 
     def _on_translation_done(self, translated_text: str):
-        self._result_panel.set_translated_text(translated_text)
-        self._result_panel.finish_processing()
-        self._result_panel.set_status("Ready")
+        detail = self._annotation_panel.detail_view
+        detail.set_translated_text(translated_text)
+        detail.finish_processing()
+
+        # Save to annotation
+        if self._processing_annotation_id:
+            self._app.annotation_manager.update(
+                self._processing_annotation_id,
+                translated_text=translated_text)
+            self._processing_annotation_id = None
 
     def _on_translation_error(self, error: str):
-        self._result_panel.set_status(f"Translation error: {error}")
-        self._result_panel.finish_processing()
+        detail = self._annotation_panel.detail_view
+        detail.set_status(f"Translation error: {error}")
+        detail.finish_processing()
+        self._processing_annotation_id = None
+
+    def _on_explain_chunk(self, chunk: str):
+        self._annotation_panel.detail_view.append_explain_chunk(chunk)
 
     def _on_explain_done(self, explanation: str):
-        self._result_panel.set_explanation(explanation)
-        self._result_panel.finish_processing()
+        detail = self._annotation_panel.detail_view
+        detail.set_explanation(explanation)
+        detail.finish_processing()
+
+        # Save to annotation
+        ann_id = detail.current_annotation_id
+        if ann_id:
+            self._app.annotation_manager.update(
+                ann_id, explanation=explanation)
+
+    # ─── Detail View Actions ──────────────────────────────────────────────
 
     def _on_copy_result(self, text_type: str):
-        clipboard = QApplication.clipboard()
-        text = self._result_panel.get_corrected_text(
-        ) if text_type == 'corrected' else self._result_panel.get_translated_text()
         msg = "Corrected text copied" if text_type == 'corrected' else "Translation copied"
-        clipboard.setText(text)
         self._status_bar.set_status(msg)
         QTimer.singleShot(2000, self._status_bar.clear_status)
 
     def _on_retranslate(self):
-        if corrected := self._result_panel.get_corrected_text():
-            self._result_panel.start_translation()
+        detail = self._annotation_panel.detail_view
+        corrected = detail.get_corrected_text()
+        if corrected:
+            ann_id = detail.current_annotation_id
+            self._processing_annotation_id = ann_id
+            detail.start_translation()
             self._ai_processor.start_translation(corrected)
 
     def _on_explain(self):
-        if corrected := self._result_panel.get_corrected_text():
-            self._result_panel.start_explanation()
+        detail = self._annotation_panel.detail_view
+        corrected = detail.get_corrected_text()
+        if corrected:
+            detail.start_explanation()
             self._ai_processor.start_explanation(
-                corrected, self._result_panel.get_translated_text())
+                corrected, detail.get_translated_text())
 
     def _on_tts(self):
-        if corrected := self._result_panel.get_corrected_text():
-            self._result_panel.set_status("Playing TTS...")
+        detail = self._annotation_panel.detail_view
+        corrected = detail.get_corrected_text()
+        if corrected:
+            detail.set_status("Playing TTS...")
             self._ai_processor.start_tts(corrected)
 
     def _on_regenerate(self):
-        if self._current_selected_text:
-            self._result_panel.clear()
-            self._result_panel.set_original_text(self._current_selected_text)
-            self._result_panel.start_correction()
-            self._ai_processor.start_correction(self._current_selected_text)
+        detail = self._annotation_panel.detail_view
+        ann_id = detail.current_annotation_id
+        if not ann_id:
+            return
+        annotation = self._app.annotation_manager.get(ann_id)
+        if not annotation:
+            return
+        self._processing_annotation_id = ann_id
+        detail.clear_results()
+        detail.set_original_text(annotation.selected_text)
+        detail.start_correction()
+        self._ai_processor.start_correction(annotation.selected_text)
+
+    # ─── Window Events ────────────────────────────────────────────────────
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._position_result_panel()
 
     def closeEvent(self, event):
         self._ai_processor.stop_all()

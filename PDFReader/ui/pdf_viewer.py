@@ -16,14 +16,17 @@ class PDFPageWidget(QWidget):
     selection_started = Signal()
     # (selected_text, word_rects in page coords)
     text_selected = Signal(str, list)
+    # Emitted when user clicks on an annotation highlight (annotation_id)
+    highlight_clicked = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._pixmap: Optional[QPixmap] = None
         self._zoom: float = 1.0
         self._is_selecting: bool = False
-        # Annotation highlights
-        self._highlight_rects: List[Tuple[QRect, QColor]] = []
+        self._mouse_press_pos: QPoint = QPoint()
+        # Annotation highlights: (QRect, QColor, annotation_id)
+        self._highlight_rects: List[Tuple[QRect, QColor, str]] = []
         # Per-line selection highlight rects (display coords)
         self._selection_rects: List[QRect] = []
         # External highlights (e.g., search results)
@@ -67,16 +70,18 @@ class PDFPageWidget(QWidget):
         self._clear_selection_internal()
         self.update()
 
-    def set_highlights(self, rects: List[Tuple[Tuple[float, float, float, float], QColor]]):
-        """Set highlight rectangles for annotations."""
+    def set_highlights(self, rects: List[Tuple[Tuple[float, float, float, float], QColor, str]]):
+        """Set highlight rectangles for annotations with IDs."""
         self._highlight_rects.clear()
-        for rect_tuple, color in rects:
+        for item in rects:
+            rect_tuple, color = item[0], item[1]
+            ann_id = item[2] if len(item) > 2 else ""
             x0, y0, x1, y1 = rect_tuple
             qrect = QRect(
                 int(x0 * self._zoom), int(y0 * self._zoom),
                 int((x1 - x0) * self._zoom), int((y1 - y0) * self._zoom)
             )
-            self._highlight_rects.append((qrect, color))
+            self._highlight_rects.append((qrect, color, ann_id))
         self.update()
 
     def set_text_selection_rects(self, rects: List[Tuple[float, float, float, float]]):
@@ -251,6 +256,7 @@ class PDFPageWidget(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton and self._pixmap:
+            self._mouse_press_pos = event.pos()
             self._is_selecting = True
             self._start_word_idx = self._find_word_at_pos(event.pos())
             self._end_word_idx = self._start_word_idx
@@ -268,12 +274,33 @@ class PDFPageWidget(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton and self._is_selecting:
             self._is_selecting = False
+            # Check if this was a click (not a drag) on an annotation highlight
+            drag_dist = (event.pos() - self._mouse_press_pos).manhattanLength()
+            if drag_dist < 5:
+                # This was a click, check if it hit a highlight
+                ann_id = self._find_highlight_at_pos(event.pos())
+                if ann_id:
+                    self._clear_selection_internal()
+                    self.highlight_clicked.emit(ann_id)
+                    self.update()
+                    return
+                # Click without drag and not on highlight - clear selection
+                self._clear_selection_internal()
+                self.update()
+                return
             text, text_rects = self._get_selected_text_and_rects()
             if text.strip():
                 self.text_selected.emit(text, text_rects)
             else:
                 self._clear_selection_internal()
             self.update()
+
+    def _find_highlight_at_pos(self, pos: QPoint) -> str:
+        """Find annotation ID if pos is inside a highlight rect."""
+        for qrect, _color, ann_id in self._highlight_rects:
+            if ann_id and qrect.contains(pos):
+                return ann_id
+        return ""
 
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
@@ -283,7 +310,7 @@ class PDFPageWidget(QWidget):
             painter.drawPixmap(0, 0, self._pixmap)
 
         # Draw annotation highlights
-        for qrect, color in self._highlight_rects:
+        for qrect, color, _ann_id in self._highlight_rects:
             highlight_color = QColor(color)
             highlight_color.setAlpha(60)
             painter.fillRect(qrect, highlight_color)
@@ -308,6 +335,7 @@ class PDFViewerWidget(QScrollArea):
 
     # bounding_rect, text, text_rects
     selection_made = Signal(tuple, str, list)
+    highlight_clicked = Signal(str)  # annotation_id
     page_clicked = Signal(QPoint)
     page_up_requested = Signal()
     page_down_requested = Signal()
@@ -357,6 +385,8 @@ class PDFViewerWidget(QScrollArea):
         """)
 
         self._page_widget.text_selected.connect(self._on_text_selected)
+        self._page_widget.highlight_clicked.connect(
+            self.highlight_clicked.emit)
 
     def display_page(self, image_data: bytes, zoom: float = 1.0, words: list = None):
         """Display a page from image data."""
