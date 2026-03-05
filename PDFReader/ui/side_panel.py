@@ -268,6 +268,83 @@ class AnnotationListPanel(QWidget):
             self.annotation_deleted.emit(ann_id)
 
 
+class DirectTranslationPanel(QWidget):
+    """Panel for displaying direct translation history."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._list = QListWidget()
+        self._list.setStyleSheet(
+            """
+            QListWidget {
+                background-color: #1e1e1e;
+                border: none;
+                color: #d4d4d4;
+                font-size: 12px;
+            }
+            QListWidget::item {
+                padding: 8px 12px;
+                border-bottom: 1px solid #333333;
+            }
+            QListWidget::item:hover {
+                background-color: #2a2d2e;
+            }
+            QListWidget::item:selected {
+                background-color: #0e639c;
+            }
+        """
+        )
+        layout.addWidget(self._list)
+
+        self._empty_label = QLabel(
+            "No direct translations yet.\nUse context menu 'To Chinese'."
+        )
+        self._empty_label.setAlignment(Qt.AlignCenter)
+        self._empty_label.setStyleSheet("color: #7f7f7f; padding: 20px;")
+        layout.addWidget(self._empty_label)
+
+    @staticmethod
+    def _shorten(text: str, max_len: int) -> str:
+        clean = " ".join((text or "").split())
+        if len(clean) <= max_len:
+            return clean
+        return clean[: max_len - 3].rstrip() + "..."
+
+    def set_translations(self, items: List[tuple]):
+        self._list.clear()
+        for en_text, zh_text in items:
+            self._list.addItem(
+                QListWidgetItem(
+                    f"EN: {self._shorten(en_text, 80)}\nZH: {self._shorten(zh_text, 100)}"
+                )
+            )
+        is_empty = self._list.count() == 0
+        self._empty_label.setVisible(is_empty)
+        self._list.setVisible(not is_empty)
+
+    def add_translation(self, en_text: str, zh_text: str):
+        self._list.insertItem(
+            0,
+            QListWidgetItem(
+                f"EN: {self._shorten(en_text, 80)}\nZH: {self._shorten(zh_text, 100)}"
+            ),
+        )
+        self._empty_label.hide()
+        self._list.show()
+
+    def clear_translations(self):
+        self._list.clear()
+        self._empty_label.show()
+        self._list.hide()
+
+
 class SidePanel(QWidget):
     """Collapsible side panel with bookmarks and annotations."""
 
@@ -351,6 +428,9 @@ class SidePanel(QWidget):
         self._annotation_panel.annotation_deleted.connect(self.annotation_deleted.emit)
         self._tabs.addTab(self._annotation_panel, "Annotations")
 
+        self._direct_translation_panel = DirectTranslationPanel()
+        self._tabs.addTab(self._direct_translation_panel, "Translations")
+
         layout.addWidget(self._tabs)
 
         self.setMinimumWidth(160)
@@ -391,6 +471,16 @@ class SidePanel(QWidget):
     def select_annotation(self, annotation_id: str):
         self._tabs.setCurrentIndex(1)
         self._annotation_panel.select_annotation(annotation_id)
+
+    def set_direct_translations(self, items: List[tuple]):
+        self._direct_translation_panel.set_translations(items)
+
+    def add_direct_translation(self, en_text: str, zh_text: str):
+        self._tabs.setCurrentIndex(2)
+        self._direct_translation_panel.add_translation(en_text, zh_text)
+
+    def clear_direct_translations(self):
+        self._direct_translation_panel.clear_translations()
 
     def is_collapsed(self) -> bool:
         return self._collapsed

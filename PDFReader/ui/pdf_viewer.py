@@ -16,6 +16,7 @@ class PDFPageWidget(QWidget):
     selection_started = Signal()
     # (selected_text, word_rects in page coords)
     text_selected = Signal(str, list)
+    page_clicked = Signal(QPoint)  # global position
     # Emitted when user clicks on an annotation highlight (annotation_id)
     highlight_clicked = Signal(str)
 
@@ -256,6 +257,7 @@ class PDFPageWidget(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton and self._pixmap:
+            self.page_clicked.emit(self.mapToGlobal(event.pos()))
             self._mouse_press_pos = event.pos()
             self._is_selecting = True
             self._start_word_idx = self._find_word_at_pos(event.pos())
@@ -406,6 +408,7 @@ class PDFViewerWidget(QScrollArea):
         """)
 
         self._page_widget.text_selected.connect(self._on_text_selected)
+        self._page_widget.page_clicked.connect(self.page_clicked.emit)
         self._page_widget.highlight_clicked.connect(
             self.highlight_clicked.emit)
 

@@ -18,11 +18,13 @@ from PDFReader.ui.annotation_panel import AnnotationPanel
 from PDFReader.ui.status_bar import StatusBarWidget
 from PDFReader.ui.side_panel import SidePanel
 from PDFReader.ui.context_menu import TextContextMenu
+from PDFReader.ui.quick_translate_popup import QuickTranslatePopup
 from PDFReader.core.app import PDFReaderApp
 from PDFReader.core.ai_processor import AIProcessor
 from PDFReader.models.annotation import Annotation
 from core.thread_manager import ThreadManager
 from services.audio.file_player import FileAudioPlayer
+from services.api.translation import TranslationThread
 
 _parent_dir = str(Path(__file__).parent.parent.parent)
 if _parent_dir not in sys.path:
@@ -53,6 +55,8 @@ class MainWindow(QMainWindow):
         self._current_selection_rect = None
         self._current_text_rects = []
         self._current_selected_text = ""
+        self._quick_translate_anchor_global = QPoint()
+        self._direct_translations: List[Tuple[str, str]] = []
         self._annotation_panel_visible = True
         self._annotation_panel_sizes = [980, 420]
         self._syncing_annotation_selection = False
@@ -72,6 +76,8 @@ class MainWindow(QMainWindow):
         self._tts_update_timer = QTimer(self)
         self._tts_update_timer.setInterval(200)
         self._tts_update_timer.timeout.connect(self._update_tts_progress)
+        self._quick_translate_popup = QuickTranslatePopup()
+        self._quick_translate_thread: Optional[TranslationThread] = None
         self._setup_ui()
         self._setup_file_menu()
         self._setup_shortcuts()
@@ -311,6 +317,7 @@ class MainWindow(QMainWindow):
 
         # Viewer
         self._viewer.selection_made.connect(self._on_selection_made)
+        self._viewer.page_clicked.connect(self._hide_quick_translate_popup)
         self._viewer.highlight_clicked.connect(self._on_highlight_clicked)
         self._viewer.page_up_requested.connect(self._app.previous_page)
         self._viewer.page_down_requested.connect(self._app.next_page)
@@ -348,6 +355,8 @@ class MainWindow(QMainWindow):
         self._context_menu.mark_clicked.connect(self._on_mark_selection)
         self._context_menu.add_bookmark_clicked.connect(
             self._on_add_bookmark_from_selection)
+        self._context_menu.translate_to_chinese_clicked.connect(
+            self._on_quick_translate_to_chinese)
 
         # Side panel
         self._side_panel.bookmark_clicked.connect(self._app.go_to_page)
@@ -393,6 +402,8 @@ class MainWindow(QMainWindow):
             self._app.open_document(file_path)
 
     def _on_document_loaded(self, file_path: str):
+        self._direct_translations = []
+        self._side_panel.clear_direct_translations()
         self._toolbar.set_page_count(self._app.page_count)
         
         # Normalize file path for consistent lookup
@@ -451,6 +462,9 @@ class MainWindow(QMainWindow):
         self._bookmarks = []
         self._side_panel.set_bookmarks([])
         self._side_panel.set_annotations([])
+        self._direct_translations = []
+        self._side_panel.clear_direct_translations()
+        self._hide_quick_translate_popup()
         self.setWindowTitle("PDF Reader")
     
     def _save_current_view_position(self):
@@ -629,6 +643,7 @@ class MainWindow(QMainWindow):
         self._current_selection_rect = rect
         self._current_text_rects = text_rects
         self._current_selected_text = text
+        self._quick_translate_anchor_global = self._selection_anchor_global(rect)
         # Show context menu at bottom-right of selection, mapped from page widget coordinates
         global_pos = self._viewer.map_page_to_global(
             QPoint(int(rect[2]), int(rect[3])))
@@ -638,6 +653,64 @@ class MainWindow(QMainWindow):
         self._viewer.clear_selection()
         self._current_selection_rect = None
         self._current_text_rects = []
+        self._hide_quick_translate_popup()
+
+    def _selection_anchor_global(self, rect: tuple) -> QPoint:
+        x_center = int((rect[0] + rect[2]) / 2)
+        y_top = int(rect[1])
+        return self._viewer.map_page_to_global(QPoint(x_center, y_top))
+
+    def _hide_quick_translate_popup(self, *_args):
+        if self._quick_translate_thread and self._quick_translate_thread.isRunning():
+            self._quick_translate_thread.stop()
+            self._quick_translate_thread.wait(500)
+        self._quick_translate_popup.hide()
+
+    def _on_quick_translate_to_chinese(self, selected_text: str):
+        if not self._app.is_document_loaded or not selected_text.strip():
+            return
+
+        # Stop previous quick translation task.
+        if self._quick_translate_thread and self._quick_translate_thread.isRunning():
+            self._quick_translate_thread.stop()
+            self._quick_translate_thread.wait(500)
+
+        anchor = self._quick_translate_anchor_global
+        if anchor.isNull() and self._current_selection_rect:
+            anchor = self._selection_anchor_global(self._current_selection_rect)
+
+        self._quick_translate_popup.show_loading(anchor)
+
+        page_text = self._app.pdf_service.get_text(self._app.current_page)
+        context_text = page_text.strip()
+        if len(context_text) > 1200:
+            context_text = context_text[:1200]
+
+        thread = TranslationThread(
+            text_to_translate=selected_text,
+            context_text=context_text,
+        )
+        thread.translation_done.connect(
+            lambda result, src=selected_text, a=anchor: self._on_quick_translation_done(
+                src, result, a
+            )
+        )
+        thread.translation_error.connect(
+            lambda error, a=anchor: self._on_quick_translation_error(error, a)
+        )
+        self._quick_translate_thread = thread
+        thread.start()
+
+    def _on_quick_translation_done(
+        self, source_text: str, translated_text: str, anchor: QPoint
+    ):
+        self._quick_translate_popup.set_result(anchor, translated_text)
+        self._direct_translations.insert(0, (source_text, translated_text))
+        self._direct_translations = self._direct_translations[:200]
+        self._side_panel.add_direct_translation(source_text, translated_text)
+
+    def _on_quick_translation_error(self, error: str, anchor: QPoint):
+        self._quick_translate_popup.set_error(anchor, error)
 
     # ─── Mark (Create Annotation) ─────────────────────────────────────────
 
@@ -1105,7 +1178,11 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         # Save current view position before closing
         self._save_current_view_position()
-        
+
+        if self._quick_translate_thread and self._quick_translate_thread.isRunning():
+            self._quick_translate_thread.stop()
+            self._quick_translate_thread.wait(500)
+        self._hide_quick_translate_popup()
         self._tts_update_timer.stop()
         self._audio_player.cleanup()
         self._ai_processor.stop_all()
