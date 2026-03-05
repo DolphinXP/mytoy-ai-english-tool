@@ -124,13 +124,6 @@ class ToolbarWidget(QWidget):
         layout.addWidget(self._file_menu_btn)
 
         # Open file button
-        self._open_btn = QPushButton("Open PDF")
-        self._open_btn.setToolTip("Open PDF file (Ctrl+O)")
-        self._open_btn.clicked.connect(self.open_file_clicked.emit)
-        self._open_btn.setIcon(_create_text_icon("📁", 24))
-        self._open_btn.setIconSize(QSize(24, 24))
-        layout.addWidget(self._open_btn)
-
         layout.addSpacing(16)
 
         # Navigation buttons

@@ -287,7 +287,6 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self):
         # Toolbar
-        self._toolbar.open_file_clicked.connect(self._on_open_file)
         self._toolbar.first_page_clicked.connect(self._app.first_page)
         self._toolbar.prev_page_clicked.connect(self._app.previous_page)
         self._toolbar.next_page_clicked.connect(self._app.next_page)
