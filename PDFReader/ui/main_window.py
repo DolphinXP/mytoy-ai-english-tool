@@ -59,6 +59,7 @@ class MainWindow(QMainWindow):
         self._processing_annotation_id: Optional[str] = None
         # Recent document history and last-used directory
         self._last_open_dir: str = ""
+        self._view_positions: dict = {}  # Maps file path to (page, scroll_x, scroll_y, zoom)
         self._recent_docs: List[str] = self._load_history()
         # Audio player for TTS
         self._audio_player = FileAudioPlayer()
@@ -172,8 +173,9 @@ class MainWindow(QMainWindow):
                 with open(self._HISTORY_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     if isinstance(data, dict):
-                        # New format with last_dir
+                        # New format with last_dir and view positions
                         self._last_open_dir = data.get("last_dir", "")
+                        self._view_positions = data.get("view_positions", {})
                         return data.get("recent", [])
                     elif isinstance(data, list):
                         return data
@@ -188,6 +190,7 @@ class MainWindow(QMainWindow):
             data = {
                 "recent": self._recent_docs,
                 "last_dir": self._last_open_dir,
+                "view_positions": getattr(self, '_view_positions', {}),
             }
             with open(self._HISTORY_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -366,20 +369,92 @@ class MainWindow(QMainWindow):
 
     def _on_document_loaded(self, file_path: str):
         self._toolbar.set_page_count(self._app.page_count)
-        self._toolbar.set_current_page(0)
+        
+        # Normalize file path for consistent lookup
+        normalized_path = str(Path(file_path).resolve())
+        
+        # Restore last view position if available
+        if normalized_path in self._view_positions:
+            pos_data = self._view_positions[normalized_path]
+            last_page = pos_data.get("page", 0)
+            last_zoom = pos_data.get("zoom", 1.0)
+            last_scroll_x = pos_data.get("scroll_x", 0)
+            last_scroll_y = pos_data.get("scroll_y", 0)
+            
+            # Clamp page to valid range
+            last_page = max(0, min(last_page, self._app.page_count - 1))
+            
+            # Set zoom first
+            if last_zoom != self._app.zoom_level:
+                self._app.set_zoom(last_zoom)
+            
+            # Go to the last page
+            if last_page != 0:
+                self._app.go_to_page(last_page)
+            else:
+                self._toolbar.set_current_page(0)
+                self._render_current_page()
+            
+            # Restore scroll position after a short delay to ensure page is rendered
+            QTimer.singleShot(100, lambda: self._restore_scroll_position(last_scroll_x, last_scroll_y))
+        else:
+            # No saved position, start at page 0
+            self._toolbar.set_current_page(0)
+            self._render_current_page()
+        
         self._status_bar.set_document_info(file_path, self._app.page_count)
         self.setWindowTitle(f"PDF Reader - {Path(file_path).name}")
-        self._render_current_page()
         bookmarks = self._app.pdf_service.get_bookmarks()
         self._side_panel.set_bookmarks(bookmarks)
         # Add to recent documents history
         self._add_to_history(file_path)
+    
+    def _restore_scroll_position(self, x: int, y: int):
+        """Restore scroll position in the viewer."""
+        h_bar = self._viewer.horizontalScrollBar()
+        v_bar = self._viewer.verticalScrollBar()
+        h_bar.setValue(x)
+        v_bar.setValue(y)
 
     def _on_document_closed(self):
+        # Save current view position before closing
+        self._save_current_view_position()
+        
         self._viewer.clear()
         self._toolbar.set_page_count(0)
         self._status_bar.set_document_info("", 0)
         self.setWindowTitle("PDF Reader")
+    
+    def _save_current_view_position(self):
+        """Save the current page, zoom, and scroll position for the open document."""
+        if not self._app.is_document_loaded:
+            return
+        
+        file_path = self._app.pdf_service.file_path
+        if not file_path:
+            return
+        
+        # Normalize file path
+        normalized_path = str(Path(file_path).resolve())
+        
+        # Get current state
+        current_page = self._app.current_page
+        current_zoom = self._app.zoom_level
+        h_bar = self._viewer.horizontalScrollBar()
+        v_bar = self._viewer.verticalScrollBar()
+        scroll_x = h_bar.value()
+        scroll_y = v_bar.value()
+        
+        # Save position
+        self._view_positions[normalized_path] = {
+            "page": current_page,
+            "zoom": current_zoom,
+            "scroll_x": scroll_x,
+            "scroll_y": scroll_y,
+        }
+        
+        # Persist to disk
+        self._save_history()
 
     def open_file(self, file_path: str):
         self._app.open_document(file_path)
@@ -391,11 +466,15 @@ class MainWindow(QMainWindow):
         self._clear_selection()
         self._render_current_page()
         self._update_page_highlights()
+        # Save position when page changes
+        self._save_current_view_position()
 
     def _on_zoom_changed(self, zoom: float):
         self._toolbar.set_zoom_level(zoom)
         self._render_current_page()
         self._update_page_highlights()
+        # Save position when zoom changes
+        self._save_current_view_position()
 
     def _fit_to_width(self):
         """Zoom so the page width fits the viewer viewport width."""
@@ -797,6 +876,9 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
 
     def closeEvent(self, event):
+        # Save current view position before closing
+        self._save_current_view_position()
+        
         self._tts_update_timer.stop()
         self._audio_player.cleanup()
         self._ai_processor.stop_all()
