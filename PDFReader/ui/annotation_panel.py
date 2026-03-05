@@ -588,10 +588,10 @@ class AnnotationPanel(QWidget):
         layout.setSpacing(0)
 
         # Header
-        header = QWidget()
-        header.setStyleSheet(
+        self._header = QWidget()
+        self._header.setStyleSheet(
             "background-color: #252526; border-bottom: 1px solid #333333;")
-        header_layout = QHBoxLayout(header)
+        header_layout = QHBoxLayout(self._header)
         header_layout.setContentsMargins(12, 8, 12, 8)
 
         title = QLabel("Annotations")
@@ -604,16 +604,16 @@ class AnnotationPanel(QWidget):
         header_layout.addWidget(self._count_label)
         header_layout.addStretch()
 
-        layout.addWidget(header)
+        layout.addWidget(self._header)
 
         # Splitter: annotation list (top) + detail view (bottom)
-        splitter = QSplitter(Qt.Vertical)
-        splitter.setStyleSheet(
+        self._splitter = QSplitter(Qt.Vertical)
+        self._splitter.setStyleSheet(
             "QSplitter::handle { background-color: #333333; height: 2px; }")
 
         # Annotation list
-        list_widget = QWidget()
-        list_layout = QVBoxLayout(list_widget)
+        self._list_widget = QWidget()
+        list_layout = QVBoxLayout(self._list_widget)
         list_layout.setContentsMargins(0, 0, 0, 0)
         list_layout.setSpacing(0)
 
@@ -648,7 +648,7 @@ class AnnotationPanel(QWidget):
         self._empty_label.setStyleSheet("color: #7f7f7f; padding: 20px;")
         self._container_layout.insertWidget(0, self._empty_label)
 
-        splitter.addWidget(list_widget)
+        self._splitter.addWidget(self._list_widget)
 
         # Detail view
         self._detail_view = AnnotationDetailView()
@@ -661,13 +661,13 @@ class AnnotationPanel(QWidget):
         self._detail_view.tts_stop_clicked.connect(self.tts_stop_clicked.emit)
         self._detail_view.tts_settings_clicked.connect(
             self.tts_settings_clicked.emit)
-        splitter.addWidget(self._detail_view)
+        self._splitter.addWidget(self._detail_view)
 
-        splitter.setSizes([200, 400])
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
+        self._splitter.setSizes([200, 400])
+        self._splitter.setStretchFactor(0, 0)
+        self._splitter.setStretchFactor(1, 1)
 
-        layout.addWidget(splitter, 1)
+        layout.addWidget(self._splitter, 1)
 
     @property
     def detail_view(self) -> AnnotationDetailView:
@@ -770,3 +770,12 @@ class AnnotationPanel(QWidget):
 
     def _update_empty_state(self):
         self._empty_label.setVisible(len(self._cards) == 0)
+
+    def set_list_visible(self, visible: bool):
+        """Show/hide the internal annotation list area."""
+        self._header.setVisible(visible)
+        self._list_widget.setVisible(visible)
+        if visible:
+            self._splitter.setSizes([200, 400])
+        else:
+            self._splitter.setSizes([0, 1])

@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         self._current_selected_text = ""
         self._annotation_panel_visible = True
         self._annotation_panel_sizes = [980, 420]
+        self._syncing_annotation_selection = False
         # Track which annotation is currently being processed by AI
         self._processing_annotation_id: Optional[str] = None
         # Recent document history and last-used directory
@@ -228,7 +229,7 @@ class MainWindow(QMainWindow):
         self._toolbar = ToolbarWidget()
         layout.addWidget(self._toolbar)
 
-        # Left side panel (bookmarks only)
+        # Left side panel (bookmarks + annotations tabs)
         self._side_panel = SidePanel()
 
         # Splitter for viewer and annotation panel
@@ -241,6 +242,7 @@ class MainWindow(QMainWindow):
         self._splitter.addWidget(self._viewer)
 
         self._annotation_panel = AnnotationPanel()
+        self._annotation_panel.set_list_visible(False)
         self._annotation_panel.setMinimumWidth(0)
         self._annotation_panel.setMaximumWidth(500)
         self._splitter.addWidget(self._annotation_panel)
@@ -352,6 +354,10 @@ class MainWindow(QMainWindow):
         self._side_panel.bookmark_clicked.connect(self._app.go_to_page)
         self._side_panel.bookmark_edited.connect(self._on_bookmark_edited)
         self._side_panel.bookmark_deleted.connect(self._on_bookmark_deleted)
+        self._side_panel.annotation_selected.connect(self._on_annotation_selected)
+        self._side_panel.annotation_deleted.connect(
+            self._on_annotation_delete_requested
+        )
 
         # AI processor signals
         self._ai_processor.correction_chunk.connect(self._on_correction_chunk)
@@ -445,6 +451,7 @@ class MainWindow(QMainWindow):
         self._status_bar.set_document_info("", 0)
         self._bookmarks = []
         self._side_panel.set_bookmarks([])
+        self._side_panel.set_annotations([])
         self.setWindowTitle("PDF Reader")
     
     def _save_current_view_position(self):
@@ -654,6 +661,7 @@ class MainWindow(QMainWindow):
         # Select it in the panel and start AI processing
         self._processing_annotation_id = annotation.id
         self._annotation_panel.select_annotation(annotation.id)
+        self._side_panel.select_annotation(annotation.id)
 
         # Show processing state in detail view
         detail = self._annotation_panel.detail_view
@@ -780,11 +788,22 @@ class MainWindow(QMainWindow):
         if not self._annotation_panel_visible:
             self._toggle_annotation_panel()
         self._annotation_panel.select_annotation(annotation_id)
+        self._side_panel.select_annotation(annotation_id)
 
     # ─── Annotation Panel Events ──────────────────────────────────────────
 
     def _on_annotation_selected(self, annotation_id: str):
         """Handle annotation selection in the panel."""
+        if self._syncing_annotation_selection:
+            return
+
+        self._syncing_annotation_selection = True
+        try:
+            self._annotation_panel.select_annotation(annotation_id)
+            self._side_panel.select_annotation(annotation_id)
+        finally:
+            self._syncing_annotation_selection = False
+
         annotation = self._app.annotation_manager.get(annotation_id)
         if annotation and annotation.page_number != self._app.current_page:
             self._app.go_to_page(annotation.page_number)
@@ -799,18 +818,22 @@ class MainWindow(QMainWindow):
 
     def _on_annotations_loaded(self, annotations: list):
         self._annotation_panel.set_annotations(annotations)
+        self._side_panel.set_annotations(annotations)
         self._status_bar.set_annotation_count(len(annotations))
         self._update_page_highlights()
 
     def _on_annotation_created(self, annotation: Annotation):
         self._annotation_panel.add_annotation(annotation)
+        self._side_panel.add_annotation(annotation)
         self._update_annotation_status()
 
     def _on_annotation_updated(self, annotation: Annotation):
         self._annotation_panel.update_annotation(annotation)
+        self._side_panel.update_annotation(annotation)
 
     def _on_annotation_deleted(self, annotation_id: str):
         self._annotation_panel.remove_annotation(annotation_id)
+        self._side_panel.remove_annotation(annotation_id)
         self._update_annotation_status()
 
     def _update_annotation_status(self):
