@@ -149,32 +149,19 @@ class AnnotationDetailView(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(4)
 
-        # Scroll area for content
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("""
-            QScrollArea { border: none; background: transparent; }
-            QScrollBar:vertical {
-                background-color: #2d2d2d; width: 8px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #5a5a5a; border-radius: 4px;
-            }
-        """)
-
-        content = QWidget()
-        self._content_layout = QVBoxLayout(content)
-        self._content_layout.setContentsMargins(0, 0, 0, 0)
-        self._content_layout.setSpacing(8)
+        # Content container (shown when an annotation is selected)
+        self._content_widget = QWidget()
+        content_layout = QVBoxLayout(self._content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(4)
 
         # Original text
-        self._content_layout.addWidget(self._section_label("Original Text"))
-        self._original_display = self._create_text_display(60)
-        self._content_layout.addWidget(self._original_display)
+        content_layout.addWidget(self._section_label("Original Text"))
+        self._original_display = self._create_text_display(50)
+        content_layout.addWidget(self._original_display)
 
         # Corrected text
         corrected_header = QHBoxLayout()
@@ -184,10 +171,10 @@ class AnnotationDetailView(QWidget):
             lambda: self._copy_text('corrected'))
         corrected_header.addWidget(self._copy_corrected_btn)
         corrected_header.addStretch()
-        self._content_layout.addLayout(corrected_header)
+        content_layout.addLayout(corrected_header)
 
-        self._corrected_display = self._create_text_display(80)
-        self._content_layout.addWidget(self._corrected_display)
+        self._corrected_display = self._create_text_display(60)
+        content_layout.addWidget(self._corrected_display)
 
         # Translation
         trans_header = QHBoxLayout()
@@ -200,39 +187,35 @@ class AnnotationDetailView(QWidget):
         self._retranslate_btn.clicked.connect(self.retranslate_clicked.emit)
         trans_header.addWidget(self._retranslate_btn)
         trans_header.addStretch()
-        self._content_layout.addLayout(trans_header)
+        content_layout.addLayout(trans_header)
 
-        self._translated_display = self._create_text_display(100)
-        self._content_layout.addWidget(self._translated_display)
+        self._translated_display = self._create_text_display(80)
+        content_layout.addWidget(self._translated_display)
 
-        # Explanation (stretches to fill remaining space, renders markdown)
+        # Explanation (stretches to fill ALL remaining space, renders markdown)
         explain_header = QHBoxLayout()
         explain_header.addWidget(self._section_label("Explanation"))
         self._explain_btn = self._small_btn("Explain")
         self._explain_btn.clicked.connect(self.explain_clicked.emit)
         explain_header.addWidget(self._explain_btn)
         explain_header.addStretch()
-        self._content_layout.addLayout(explain_header)
+        content_layout.addLayout(explain_header)
 
         self._explain_display = self._create_markdown_display()
-        self._explain_display.hide()
-        self._content_layout.addWidget(
-            self._explain_display, 1)  # stretch factor 1
-
-        scroll.setWidget(content)
-        layout.addWidget(scroll, 1)
+        # Always visible so it always occupies remaining space
+        content_layout.addWidget(self._explain_display, 1)  # stretch factor 1
 
         # Status label
         self._status_label = QLabel("Ready")
         self._status_label.setStyleSheet("""
             QLabel {
                 color: #888888; font-size: 11px;
-                padding: 4px 8px;
+                padding: 2px 8px;
                 background-color: #252526;
                 border-radius: 4px;
             }
         """)
-        layout.addWidget(self._status_label)
+        content_layout.addWidget(self._status_label)
 
         # Action buttons
         btn_layout = QHBoxLayout()
@@ -249,7 +232,9 @@ class AnnotationDetailView(QWidget):
         btn_layout.addWidget(self._regenerate_btn)
 
         btn_layout.addStretch()
-        layout.addLayout(btn_layout)
+        content_layout.addLayout(btn_layout)
+
+        layout.addWidget(self._content_widget, 1)
 
         # Empty state
         self._empty_label = QLabel("Select an annotation to view details")
@@ -258,11 +243,7 @@ class AnnotationDetailView(QWidget):
         layout.addWidget(self._empty_label)
 
         # Initially show empty state
-        scroll.hide()
-        self._status_label.hide()
-        self._tts_btn.hide()
-        self._regenerate_btn.hide()
-        self._scroll = scroll
+        self._content_widget.hide()
 
     def _section_label(self, text: str) -> QLabel:
         label = QLabel(text)
@@ -347,10 +328,7 @@ class AnnotationDetailView(QWidget):
         """Display an annotation's stored AI results."""
         self._current_annotation_id = annotation.id
         self._empty_label.hide()
-        self._scroll.show()
-        self._status_label.show()
-        self._tts_btn.show()
-        self._regenerate_btn.show()
+        self._content_widget.show()
 
         self._original_display.setPlainText(annotation.selected_text)
         self._corrected_text = annotation.corrected_text
@@ -360,9 +338,8 @@ class AnnotationDetailView(QWidget):
         self._explanation = annotation.explanation
         if annotation.explanation:
             self._explain_display.setMarkdown(annotation.explanation)
-            self._explain_display.show()
         else:
-            self._explain_display.hide()
+            self._explain_display.clear()
 
         self._status_label.setText("Ready")
         self.set_processing(False)
@@ -370,10 +347,7 @@ class AnnotationDetailView(QWidget):
     def show_empty(self):
         """Show empty state."""
         self._current_annotation_id = ""
-        self._scroll.hide()
-        self._status_label.hide()
-        self._tts_btn.hide()
-        self._regenerate_btn.hide()
+        self._content_widget.hide()
         self._empty_label.show()
 
     def set_original_text(self, text: str):
@@ -404,14 +378,12 @@ class AnnotationDetailView(QWidget):
     def set_explanation(self, text: str):
         self._explanation = text
         self._explain_display.setMarkdown(text)
-        self._explain_display.show()
 
     def append_explain_chunk(self, chunk: str):
         if self._explanation == "" or self._explanation == "Explaining...":
             self._explanation = ""
         self._explanation += chunk
         self._explain_display.setMarkdown(self._explanation)
-        self._explain_display.show()
 
     def set_status(self, status: str):
         self._status_label.setText(status)
@@ -435,7 +407,6 @@ class AnnotationDetailView(QWidget):
     def start_explanation(self):
         self._explanation = "Explaining..."
         self._explain_display.setPlainText("Explaining...")
-        self._explain_display.show()
         self.set_status("Generating explanation...")
 
     def finish_processing(self):
@@ -459,7 +430,6 @@ class AnnotationDetailView(QWidget):
         self._corrected_display.clear()
         self._translated_display.clear()
         self._explain_display.clear()
-        self._explain_display.hide()
         self.set_status("Ready")
 
 
