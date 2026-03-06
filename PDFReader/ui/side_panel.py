@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QListWidget,
     QListWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QMenu,
     QInputDialog,
     QTabWidget,
@@ -38,7 +40,7 @@ def _create_text_icon(text: str, size: int = 20, color: str = "#d4d4d4") -> QIco
 
 
 class BookmarkPanel(QWidget):
-    """Panel for displaying PDF bookmarks/outline."""
+    """Panel for displaying PDF bookmarks/outline as a tree."""
 
     bookmark_clicked = Signal(int)  # page_number
     bookmark_edited = Signal(int, str)  # index, new_title
@@ -54,33 +56,35 @@ class BookmarkPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self._list = QListWidget()
-        self._list.setStyleSheet(
+        self._tree = QTreeWidget()
+        self._tree.setColumnCount(1)
+        self._tree.setHeaderHidden(True)
+        self._tree.setIndentation(16)
+        self._tree.setStyleSheet(
             """
-            QListWidget {
+            QTreeWidget {
                 background-color: #1e1e1e;
                 border: none;
                 color: #d4d4d4;
                 font-size: 12px;
             }
-            QListWidget::item {
+            QTreeWidget::item {
                 padding: 8px 12px;
-                border-bottom: 1px solid #333333;
             }
-            QListWidget::item:hover {
+            QTreeWidget::item:hover {
                 background-color: #2a2d2e;
             }
-            QListWidget::item:selected {
+            QTreeWidget::item:selected {
                 background-color: #0e639c;
             }
         """
         )
-        self._list.itemClicked.connect(self._on_item_clicked)
-        self._list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self._list.customContextMenuRequested.connect(
+        self._tree.itemClicked.connect(self._on_item_clicked)
+        self._tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(
             self._on_context_menu_requested
         )
-        layout.addWidget(self._list)
+        layout.addWidget(self._tree)
 
         self._empty_label = QLabel("No bookmarks in this PDF")
         self._empty_label.setAlignment(Qt.AlignCenter)
@@ -92,43 +96,59 @@ class BookmarkPanel(QWidget):
         self._bookmarks = sorted(
             list(bookmarks), key=lambda item: (item[1], str(item[0]).lower())
         )
-        self._list.clear()
+        self._tree.clear()
         if not self._bookmarks:
             self._empty_label.show()
-            self._list.hide()
+            self._tree.hide()
             return
 
         self._empty_label.hide()
-        self._list.show()
+        self._tree.show()
 
+        # Build a hierarchy from bookmark level while preserving sorted order.
+        level_stack: list[QTreeWidgetItem] = []
         for idx, (title, page, level) in enumerate(self._bookmarks):
-            item = QListWidgetItem()
-            indent = "  " * level
-            item.setText(f"{indent}{title}")
-            item.setData(Qt.UserRole, page)
-            item.setData(Qt.UserRole + 1, idx)
-            item.setData(Qt.UserRole + 2, title)
-            self._list.addItem(item)
+            item = QTreeWidgetItem()
+            item.setText(0, title)
+            item.setData(0, Qt.UserRole, page)
+            item.setData(0, Qt.UserRole + 1, idx)
+            item.setData(0, Qt.UserRole + 2, title)
+            try:
+                level = max(0, int(level))
+            except (TypeError, ValueError):
+                level = 0
 
-    def _on_item_clicked(self, item: QListWidgetItem):
-        page = item.data(Qt.UserRole)
+            while len(level_stack) > level:
+                level_stack.pop()
+
+            if level == 0 or not level_stack:
+                self._tree.addTopLevelItem(item)
+            else:
+                level_stack[-1].addChild(item)
+
+            level_stack.append(item)
+
+        self._tree.expandAll()
+
+    def _on_item_clicked(self, item: QTreeWidgetItem, _column: int):
+        page = item.data(0, Qt.UserRole)
         if page is not None:
             self.bookmark_clicked.emit(page)
 
     def _on_context_menu_requested(self, pos):
-        item = self._list.itemAt(pos)
+        item = self._tree.itemAt(pos)
         if item is None:
             return
 
-        index = item.data(Qt.UserRole + 1)
-        current_title = item.data(Qt.UserRole + 2) or ""
+        index = item.data(0, Qt.UserRole + 1)
+        current_title = item.data(0, Qt.UserRole + 2) or ""
         if index is None:
             return
 
         menu = QMenu(self)
         edit_action = menu.addAction("Edit Bookmark")
         delete_action = menu.addAction("Delete Bookmark")
-        chosen = menu.exec(self._list.mapToGlobal(pos))
+        chosen = menu.exec(self._tree.mapToGlobal(pos))
         if chosen == edit_action:
             new_title, ok = QInputDialog.getText(
                 self, "Edit Bookmark", "Bookmark title:", text=current_title
