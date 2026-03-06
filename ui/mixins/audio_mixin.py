@@ -109,6 +109,8 @@ class AudioMixin:
             self._streaming_done = True
         else:
             self.set_status(self.icon_mgr.get_icon_label("ready", "Audio ready"))
+            # File-based modes (e.g. Microsoft Read Aloud) should start playback immediately.
+            self._start_file_playback()
 
         self.audio_controls.set_enabled(True)
         self.audio_controls.set_time(0, self.file_player.audio_length)

@@ -115,7 +115,6 @@ class RetranslateMixin:
 
             self.retranslate_tts_thread = remote_manager.create_tts_thread(
                 text=tts_text,
-                server_url="ws://10.110.31.157:3000/stream",
                 streaming=True
             )
             self.retranslate_tts_thread.tts_completed.connect(lambda p: self.set_audio_ready(p))

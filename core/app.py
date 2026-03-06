@@ -37,14 +37,18 @@ class MainApp(QObject):
         self.popup_window = None
 
         # TTS configuration
-        self.tts_server_type = "remote"
+        self.tts_server_type = "microsoft"
         self.tts_remote_url = "ws://10.110.31.157:3000/stream"
+        self.tts_microsoft_voice = "en-US-EmmaMultilingualNeural"
+        self.tts_microsoft_rate = "+0%"
 
         # Text processor
         self.text_processor = TextProcessor(
             self.thread_manager,
             self.tts_server_type,
-            self.tts_remote_url
+            self.tts_remote_url,
+            self.tts_microsoft_voice,
+            self.tts_microsoft_rate,
         )
 
         # Setup callbacks
@@ -136,20 +140,33 @@ class MainApp(QObject):
         """Show TTS server selection dialog."""
         dialog = TTSServerSelectionDialog(
             current_server_type=self.tts_server_type,
-            current_remote_url=self.tts_remote_url
+            current_remote_url=self.tts_remote_url,
+            current_microsoft_voice=self.tts_microsoft_voice,
+            current_microsoft_rate=self.tts_microsoft_rate,
         )
 
         if dialog.exec() == TTSServerSelectionDialog.Accepted:
-            server_type, remote_url = dialog.get_server_config()
+            server_type, remote_url, microsoft_voice, microsoft_rate = dialog.get_server_config()
             self.tts_server_type = server_type
             self.tts_remote_url = remote_url
+            self.tts_microsoft_voice = microsoft_voice
+            self.tts_microsoft_rate = microsoft_rate
 
             # Update text processor with new config
-            self.text_processor.set_tts_config(server_type, remote_url)
+            self.text_processor.set_tts_config(
+                server_type,
+                remote_url,
+                microsoft_voice,
+                microsoft_rate,
+            )
 
             print(f"TTS Server set to: {server_type}")
             if server_type == "remote":
                 print(f"Remote URL: {remote_url}")
+            elif server_type == "microsoft":
+                print(
+                    f"Microsoft voice: {microsoft_voice}, rate: {microsoft_rate}"
+                )
 
     def change_tts_server(self):
         """Change TTS server from tray menu."""

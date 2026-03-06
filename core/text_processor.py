@@ -12,14 +12,27 @@ from services.tts.remote_tts import RemoteTTSManager
 class TextProcessor:
     """Handles the text processing pipeline: correction -> translation + TTS."""
 
-    def __init__(self, thread_manager, tts_server_type="remote", tts_remote_url="ws://10.110.31.157:3000/stream"):
+    def __init__(
+        self,
+        thread_manager,
+        tts_server_type="microsoft",
+        tts_remote_url="ws://10.110.31.157:3000/stream",
+        tts_microsoft_voice="en-US-EmmaMultilingualNeural",
+        tts_microsoft_rate="+0%",
+    ):
         self.thread_manager = thread_manager
         self.tts_server_type = tts_server_type
         self.tts_remote_url = tts_remote_url
+        self.tts_microsoft_voice = tts_microsoft_voice
+        self.tts_microsoft_rate = tts_microsoft_rate
 
         # TTS managers
         self.vibevoice_manager = None  # Local model manager
         self.vibevoice_remote_manager = RemoteTTSManager()
+        self.vibevoice_remote_manager.set_source(tts_server_type)
+        self.vibevoice_remote_manager.set_server_url(tts_remote_url)
+        self.vibevoice_remote_manager.set_microsoft_voice(tts_microsoft_voice)
+        self.vibevoice_remote_manager.set_microsoft_rate(tts_microsoft_rate)
 
         # Callbacks
         self.on_correction_chunk = None
@@ -33,11 +46,25 @@ class TextProcessor:
         self.on_tts_progress = None
         self.on_audio_chunk_ready = None
 
-    def set_tts_config(self, server_type, remote_url):
+    def set_tts_config(
+        self,
+        server_type,
+        remote_url,
+        microsoft_voice=None,
+        microsoft_rate=None,
+    ):
         """Update TTS configuration."""
         self.tts_server_type = server_type
         self.tts_remote_url = remote_url
+        if microsoft_voice is not None:
+            self.tts_microsoft_voice = microsoft_voice
+        if microsoft_rate is not None:
+            self.tts_microsoft_rate = microsoft_rate
+
+        self.vibevoice_remote_manager.set_source(server_type)
         self.vibevoice_remote_manager.set_server_url(remote_url)
+        self.vibevoice_remote_manager.set_microsoft_voice(self.tts_microsoft_voice)
+        self.vibevoice_remote_manager.set_microsoft_rate(self.tts_microsoft_rate)
 
     def process_text(self, text):
         """
@@ -91,14 +118,24 @@ class TextProcessor:
     def _start_tts(self, text):
         """Start TTS thread with the given text."""
         try:
-            # Use remote or local TTS based on user selection
-            if self.tts_server_type == "remote":
+            # Use local TTS only when explicitly selected; otherwise use manager providers.
+            if self.tts_server_type in ("remote", "microsoft"):
+                use_streaming = self.tts_server_type == "remote"
                 tts_thread = self.vibevoice_remote_manager.create_tts_thread(
                     text=text,
                     server_url=self.tts_remote_url,
-                    streaming=True
+                    source=self.tts_server_type,
+                    microsoft_voice=self.tts_microsoft_voice,
+                    microsoft_rate=self.tts_microsoft_rate,
+                    streaming=use_streaming
                 )
-                print(f"Using remote TTS server: {self.tts_remote_url}")
+                if self.tts_server_type == "microsoft":
+                    print(
+                        f"Using Microsoft Read Aloud: voice={self.tts_microsoft_voice}, "
+                        f"rate={self.tts_microsoft_rate}"
+                    )
+                else:
+                    print(f"Using remote TTS server: {self.tts_remote_url}")
             else:
                 # Use local TTS model
                 if self.vibevoice_manager is None:
