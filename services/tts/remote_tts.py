@@ -304,7 +304,7 @@ class RemoteTTSThread(QThread):
 
 
 class RemoteTTSManager:
-    """Manager for remote VibeVoice TTS."""
+    """Manager for TTS providers."""
 
     _instance = None
     _lock = threading.Lock()
@@ -321,8 +321,20 @@ class RemoteTTSManager:
         if self._initialized:
             return
         self._initialized = True
+        self._source = "remote"
         self._server_url = "ws://10.110.31.157:3000/stream"
         self._voice_preset = "en-Emma_woman"
+        self._microsoft_voice = "en-US-EmmaMultilingualNeural"
+        self._microsoft_rate = "+0%"
+
+    def set_source(self, source):
+        """Set active TTS source."""
+        source = (source or "remote").strip().lower()
+        self._source = source if source in {"remote", "microsoft"} else "remote"
+
+    def get_source(self):
+        """Get active TTS source."""
+        return self._source
 
     def set_server_url(self, url):
         """Set the remote server URL."""
@@ -340,8 +352,49 @@ class RemoteTTSManager:
         """Get the current voice preset."""
         return self._voice_preset
 
-    def create_tts_thread(self, text, server_url=None, streaming=False, voice_preset=None):
-        """Create a new TTS thread for remote server."""
+    def set_microsoft_voice(self, voice):
+        """Set Microsoft Edge voice."""
+        if voice and voice.strip():
+            self._microsoft_voice = voice.strip()
+
+    def get_microsoft_voice(self):
+        """Get Microsoft Edge voice."""
+        return self._microsoft_voice
+
+    def set_microsoft_rate(self, rate):
+        """Set Microsoft Edge speech rate."""
+        if rate and rate.strip():
+            self._microsoft_rate = rate.strip()
+
+    def get_microsoft_rate(self):
+        """Get Microsoft Edge speech rate."""
+        return self._microsoft_rate
+
+    def create_tts_thread(
+        self,
+        text,
+        server_url=None,
+        streaming=False,
+        voice_preset=None,
+        source=None,
+        microsoft_voice=None,
+        microsoft_rate=None,
+    ):
+        """Create a new TTS thread for the configured source."""
+        selected_source = (source or self._source or "remote").strip().lower()
+
+        if selected_source == "microsoft":
+            from services.tts.microsoft_tts import MicrosoftEdgeTTSThread
+
+            voice = microsoft_voice or self._microsoft_voice
+            rate = microsoft_rate or self._microsoft_rate
+            return MicrosoftEdgeTTSThread(
+                text=text,
+                voice=voice,
+                rate=rate,
+                streaming=streaming,
+            )
+
         if server_url is None:
             server_url = self._server_url
         if voice_preset is None:

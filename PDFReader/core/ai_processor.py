@@ -8,7 +8,7 @@ from core.thread_manager import ThreadManager
 from services.api.text_correction import TextCorrectionThread
 from services.api.translation import TranslationThread
 from services.api.explain import ExplainThread
-from services.tts.remote_tts import RemoteTTSThread
+from services.tts.remote_tts import RemoteTTSManager
 
 
 class AIProcessor(QObject):
@@ -31,6 +31,7 @@ class AIProcessor(QObject):
         super().__init__(parent)
         self._thread_manager = thread_manager
         self._explain_thread: Optional[ExplainThread] = None
+        self._tts_manager = RemoteTTSManager()
 
     def start_correction(self, text: str):
         """Start text correction processing."""
@@ -71,7 +72,7 @@ class AIProcessor(QObject):
         """Start text-to-speech generation."""
         try:
             self.tts_started.emit()
-            thread = RemoteTTSThread(text)
+            thread = self._tts_manager.create_tts_thread(text=text)
             thread.tts_completed.connect(self.tts_completed.emit)
             thread.tts_error.connect(self.tts_error.emit)
             thread.finished.connect(self.tts_finished.emit)

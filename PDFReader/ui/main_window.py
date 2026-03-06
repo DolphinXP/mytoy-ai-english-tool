@@ -1346,7 +1346,14 @@ class MainWindow(QMainWindow):
 
     def _on_tts_settings(self):
         """Show TTS settings dialog."""
-        from PySide6.QtWidgets import QDialog, QFormLayout, QRadioButton, QLineEdit, QDialogButtonBox, QButtonGroup
+        from PySide6.QtWidgets import (
+            QDialog,
+            QFormLayout,
+            QRadioButton,
+            QLineEdit,
+            QDialogButtonBox,
+            QButtonGroup,
+        )
         from services.tts.remote_tts import RemoteTTSManager
 
         manager = RemoteTTSManager()
@@ -1369,20 +1376,40 @@ class MainWindow(QMainWindow):
         # TTS source selection
         group = QButtonGroup(dialog)
         remote_radio = QRadioButton("Remote TTS (WebSocket)")
-        local_radio = QRadioButton("Local TTS (System)")
+        microsoft_radio = QRadioButton("Microsoft Read Aloud (Online)")
         group.addButton(remote_radio, 0)
-        group.addButton(local_radio, 1)
-        remote_radio.setChecked(True)
+        group.addButton(microsoft_radio, 1)
+        source = manager.get_source()
+        if source == "microsoft":
+            microsoft_radio.setChecked(True)
+        else:
+            remote_radio.setChecked(True)
         form.addRow("Source:", remote_radio)
-        form.addRow("", local_radio)
+        form.addRow("", microsoft_radio)
 
-        # Server URL
+        # Remote settings
         url_input = QLineEdit(manager.get_server_url())
-        form.addRow("Server URL:", url_input)
+        remote_voice_input = QLineEdit(manager.get_voice_preset())
+        form.addRow("Remote URL:", url_input)
+        form.addRow("Remote Voice:", remote_voice_input)
 
-        # Voice preset
-        voice_input = QLineEdit(manager.get_voice_preset())
-        form.addRow("Voice:", voice_input)
+        # Microsoft settings
+        microsoft_voice_input = QLineEdit(manager.get_microsoft_voice())
+        microsoft_rate_input = QLineEdit(manager.get_microsoft_rate())
+        microsoft_rate_input.setToolTip("Example: +0%, +20%, -15%")
+        form.addRow("MS Voice:", microsoft_voice_input)
+        form.addRow("MS Rate:", microsoft_rate_input)
+
+        def _refresh_fields():
+            is_remote = remote_radio.isChecked()
+            url_input.setEnabled(is_remote)
+            remote_voice_input.setEnabled(is_remote)
+            microsoft_voice_input.setEnabled(not is_remote)
+            microsoft_rate_input.setEnabled(not is_remote)
+
+        remote_radio.toggled.connect(_refresh_fields)
+        microsoft_radio.toggled.connect(_refresh_fields)
+        _refresh_fields()
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -1395,8 +1422,11 @@ class MainWindow(QMainWindow):
         form.addRow(buttons)
 
         if dialog.exec() == QDialog.Accepted:
+            manager.set_source("remote" if remote_radio.isChecked() else "microsoft")
             manager.set_server_url(url_input.text().strip())
-            manager.set_voice_preset(voice_input.text().strip())
+            manager.set_voice_preset(remote_voice_input.text().strip())
+            manager.set_microsoft_voice(microsoft_voice_input.text().strip())
+            manager.set_microsoft_rate(microsoft_rate_input.text().strip())
 
     def _on_regenerate(self):
         detail = self._annotation_panel.detail_view
