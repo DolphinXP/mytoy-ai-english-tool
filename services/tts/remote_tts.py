@@ -321,7 +321,7 @@ class RemoteTTSManager:
         if self._initialized:
             return
         self._initialized = True
-        self._source = "remote"
+        self._source = "microsoft"
         self._server_url = "ws://10.110.31.157:3000/stream"
         self._voice_preset = "en-Emma_woman"
         self._microsoft_voice = "en-US-EmmaMultilingualNeural"
