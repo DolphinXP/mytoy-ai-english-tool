@@ -263,6 +263,65 @@ class PDFService:
             print(f"Error getting text words: {e}")
             return []
 
+    def get_text_chars(self, page_number: int) -> List[Tuple]:
+        """
+        Get character-level text data with bounding boxes.
+
+        Each entry is shaped like:
+        (x0, y0, x1, y1, char_text, block_no, line_no, char_no)
+
+        Uses rawdict character boxes when available; otherwise falls back to
+        per-span proportional slicing.
+        """
+        page = self.get_page(page_number)
+        if not page:
+            return []
+
+        chars: List[Tuple] = []
+        try:
+            raw = page.get_text("rawdict")
+            for block_idx, block in enumerate(raw.get("blocks", [])):
+                if block.get("type") != 0:
+                    continue
+
+                for line_idx, line in enumerate(block.get("lines", [])):
+                    line_char_no = 0
+                    for span in line.get("spans", []):
+                        span_chars = span.get("chars")
+                        if isinstance(span_chars, list) and span_chars:
+                            for ch in span_chars:
+                                c = ch.get("c", "")
+                                bbox = ch.get("bbox")
+                                if bbox is None or len(bbox) < 4:
+                                    continue
+                                x0, y0, x1, y1 = bbox[:4]
+                                chars.append(
+                                    (x0, y0, x1, y1, c, block_idx, line_idx, line_char_no)
+                                )
+                                line_char_no += 1
+                            continue
+
+                        # Fallback for environments where span-level chars are unavailable.
+                        text = span.get("text", "")
+                        bbox = span.get("bbox")
+                        if not text or bbox is None or len(bbox) < 4:
+                            continue
+                        x0, y0, x1, y1 = bbox[:4]
+                        width = max(0.0, float(x1) - float(x0))
+                        step = width / max(1, len(text))
+                        for i, c in enumerate(text):
+                            cx0 = x0 + i * step
+                            cx1 = x0 + (i + 1) * step
+                            chars.append(
+                                (cx0, y0, cx1, y1, c, block_idx, line_idx, line_char_no)
+                            )
+                            line_char_no += 1
+
+            return sorted(chars, key=lambda c: (c[5], c[6], c[7]))
+        except Exception as e:
+            print(f"Error getting text chars: {e}")
+            return []
+
     def get_bookmarks(self) -> List[Tuple[str, int, int]]:
         """
         Get document bookmarks/outline.

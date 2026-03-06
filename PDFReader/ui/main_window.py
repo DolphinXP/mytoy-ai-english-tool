@@ -680,8 +680,13 @@ class MainWindow(QMainWindow):
                     Qt.SmoothTransformation,
                 )
 
-            words = self._app.pdf_service.get_text_words(
-                self._app.current_page)
+            words = self._app.pdf_service.get_text_chars(
+                self._app.current_page
+            )
+            if not words:
+                words = self._app.pdf_service.get_text_words(
+                    self._app.current_page
+                )
             self._viewer.display_pixmap(
                 pixmap, self._app.zoom_level, words)
 

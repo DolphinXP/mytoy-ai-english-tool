@@ -1,8 +1,8 @@
 """
 PDF viewer widget with text-flow selection support.
 
-Implements word-level text selection that follows reading order,
-similar to how text editors select text across lines.
+Selection units are provided by the caller (word-level or character-level),
+and selection follows reading order across lines.
 """
 from typing import Optional, Tuple, List, Callable
 from PySide6.QtWidgets import QWidget, QScrollArea, QVBoxLayout, QApplication
@@ -34,8 +34,8 @@ class PDFPageWidget(QWidget):
         # External highlights (e.g., search results)
         self._external_text_rects: List[QRect] = []
 
-        # Word-level text data from PyMuPDF get_text("words")
-        # Each word: (x0, y0, x1, y1, word_text, block_no, line_no, word_no)
+        # Text units (word-level or character-level).
+        # Tuple format: (x0, y0, x1, y1, text, block_no, line_no, unit_no)
         self._words: List[Tuple] = []
         self._start_word_idx: int = -1
         self._end_word_idx: int = -1
@@ -244,11 +244,10 @@ class PDFPageWidget(QWidget):
             w = self._words[idx]
             line_key = (w[5], w[6])
 
-            # Add newline between different lines, space between words on same line
+            # Preserve line boundaries but do not force spaces between units.
+            # This allows character-wise selection without auto word expansion.
             if prev_line_key is not None and prev_line_key != line_key:
                 text_parts.append("\n")
-            elif prev_line_key is not None:
-                text_parts.append(" ")
 
             text_parts.append(w[4])
             text_rects.append((w[0], w[1], w[2], w[3]))
@@ -272,13 +271,13 @@ class PDFPageWidget(QWidget):
             event.accept()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """Handle double-click to select a single word."""
+        """Handle double-click to select a whole word."""
         if event.button() == Qt.LeftButton and self._pixmap:
-            word_idx = self._find_word_at_pos(event.pos())
-            if word_idx >= 0:
-                # Select just this word
-                self._start_word_idx = word_idx
-                self._end_word_idx = word_idx
+            unit_idx = self._find_word_at_pos(event.pos())
+            if unit_idx >= 0:
+                start_idx, end_idx = self._expand_to_word(unit_idx)
+                self._start_word_idx = start_idx
+                self._end_word_idx = end_idx
                 self._is_selecting = False
                 self._external_text_rects.clear()
                 self._update_selection_rects()
@@ -289,6 +288,52 @@ class PDFPageWidget(QWidget):
                 if text.strip():
                     self.text_selected.emit(text, text_rects)
             event.accept()
+
+    @staticmethod
+    def _is_word_char(ch: str) -> bool:
+        if not ch:
+            return False
+        return ch.isalnum() or ch in {"_", "'"}
+
+    def _expand_to_word(self, idx: int) -> Tuple[int, int]:
+        """
+        Expand around a clicked unit to a whole word on the same line.
+
+        In character mode, expands across contiguous word characters.
+        In word mode (unit text length > 1), selects only that word unit.
+        """
+        if idx < 0 or idx >= len(self._words):
+            return idx, idx
+
+        cur = self._words[idx]
+        cur_text = str(cur[4] or "")
+
+        # Word-mode fallback: a unit is already a whole word.
+        if len(cur_text) > 1:
+            return idx, idx
+
+        line_key = (cur[5], cur[6])
+        if not self._is_word_char(cur_text):
+            return idx, idx
+
+        lo = idx
+        hi = idx
+
+        while lo - 1 >= 0:
+            prev = self._words[lo - 1]
+            prev_text = str(prev[4] or "")
+            if (prev[5], prev[6]) != line_key or not self._is_word_char(prev_text):
+                break
+            lo -= 1
+
+        while hi + 1 < len(self._words):
+            nxt = self._words[hi + 1]
+            nxt_text = str(nxt[4] or "")
+            if (nxt[5], nxt[6]) != line_key or not self._is_word_char(nxt_text):
+                break
+            hi += 1
+
+        return lo, hi
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._is_selecting and self._pixmap:
