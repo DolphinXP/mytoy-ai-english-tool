@@ -382,6 +382,9 @@ class MainWindow(QMainWindow):
         self._side_panel.annotation_deleted.connect(
             self._on_annotation_delete_requested
         )
+        self._side_panel.translation_deleted.connect(
+            self._on_direct_translation_delete_requested
+        )
         self._quick_translate_popup.close_requested.connect(
             self._hide_quick_translate_popup
         )
@@ -426,8 +429,10 @@ class MainWindow(QMainWindow):
             self._app.open_document(file_path)
 
     def _on_document_loaded(self, file_path: str):
-        self._direct_translations = []
-        self._side_panel.clear_direct_translations()
+        self._direct_translations = (
+            self._app.annotation_manager.get_direct_translations()
+        )
+        self._side_panel.set_direct_translations(self._direct_translations)
         self._toolbar.set_page_count(self._app.page_count)
         
         # Normalize file path for consistent lookup
@@ -783,10 +788,67 @@ class MainWindow(QMainWindow):
         display_source = corrected_text.strip() or source_text
         self._direct_translations.insert(0, (display_source, translated_text))
         self._direct_translations = self._direct_translations[:200]
+        self._app.annotation_manager.add_direct_translation(
+            display_source, translated_text
+        )
         self._side_panel.add_direct_translation(display_source, translated_text)
 
     def _on_quick_translation_error(self, error: str, anchor: QPoint):
         self._quick_translate_popup.set_error(anchor, error)
+
+    def _on_direct_translation_delete_requested(self, index: int):
+        if index < 0 or index >= len(self._direct_translations):
+            return
+        del self._direct_translations[index]
+        self._app.annotation_manager.delete_direct_translation(index)
+        self._side_panel.set_direct_translations(self._direct_translations)
+
+    def _build_quick_translation_context(
+        self, selected_text: str, max_chars: int = 8000
+    ) -> str:
+        """
+        Build a broader context window for quick translation.
+
+        Prioritizes current page text, then nearby pages, while keeping
+        payload size bounded for responsiveness.
+        """
+        if not self._app.is_document_loaded or max_chars <= 0:
+            return ""
+
+        page_count = self._app.page_count
+        current = self._app.current_page
+        page_order = [current, current - 1, current + 1, current - 2, current + 2]
+
+        parts: List[str] = []
+        remaining = max_chars
+
+        prefix = (
+            "Selected text:\n"
+            f"{selected_text.strip()}\n\n"
+            "Document context (use for meaning disambiguation only):\n"
+        )
+        if len(prefix) < remaining:
+            parts.append(prefix)
+            remaining -= len(prefix)
+
+        for page_index in page_order:
+            if page_index < 0 or page_index >= page_count:
+                continue
+
+            page_text = (self._app.pdf_service.get_text(page_index) or "").strip()
+            if not page_text:
+                continue
+
+            chunk = f"[Page {page_index + 1}]\n{page_text}\n\n"
+            if len(chunk) > remaining:
+                chunk = chunk[:remaining]
+            if chunk:
+                parts.append(chunk)
+                remaining -= len(chunk)
+            if remaining <= 0:
+                break
+
+        return "".join(parts).strip()
 
     def _start_quick_translation(
         self, source_text: str, corrected_text: str, anchor: QPoint
@@ -796,11 +858,7 @@ class MainWindow(QMainWindow):
 
         text_to_translate = (corrected_text or "").strip() or source_text
         self._quick_translate_popup.show_loading(anchor)
-
-        page_text = self._app.pdf_service.get_text(self._app.current_page)
-        context_text = page_text.strip()
-        if len(context_text) > 1200:
-            context_text = context_text[:1200]
+        context_text = self._build_quick_translation_context(text_to_translate)
 
         thread = TranslationThread(
             text_to_translate=text_to_translate,

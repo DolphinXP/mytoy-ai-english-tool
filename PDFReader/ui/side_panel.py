@@ -211,6 +211,51 @@ class AnnotationListPanel(QWidget):
         self._empty_label.setStyleSheet("color: #7f7f7f; padding: 20px;")
         layout.addWidget(self._empty_label)
 
+    def _create_row_widget(self, text: str, on_delete):
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(8, 4, 8, 4)
+        row_layout.setSpacing(6)
+
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: #d4d4d4;")
+        row_layout.addWidget(label, 1)
+
+        delete_btn = QPushButton("")
+        delete_btn.setFixedSize(22, 22)
+        delete_btn.setToolTip("Delete annotation")
+        delete_btn.setStyleSheet(
+            """
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #8a8a8a;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #4a2020;
+                border-radius: 4px;
+                color: #f48771;
+            }
+            """
+        )
+        delete_btn.setIcon(_create_text_icon("✕", 18, "#d4d4d4"))
+        delete_btn.setIconSize(QSize(18, 18))
+        delete_btn.clicked.connect(on_delete)
+        row_layout.addWidget(delete_btn)
+
+        row.setContextMenuPolicy(Qt.CustomContextMenu)
+        def _show_row_menu(pos):
+            menu = QMenu(self)
+            delete_action = menu.addAction("Delete Annotation")
+            chosen = menu.exec(row.mapToGlobal(pos))
+            if chosen == delete_action:
+                on_delete()
+        row.customContextMenuRequested.connect(_show_row_menu)
+
+        return row
+
     def _annotation_text(self, ann: Annotation) -> str:
         preview = " ".join(ann.selected_text.split())
         if len(preview) > 80:
@@ -231,14 +276,26 @@ class AnnotationListPanel(QWidget):
             annotations, key=lambda ann: (ann.page_number, ann.created_at)
         )
         for ann in sorted_annotations:
-            item = QListWidgetItem(self._annotation_text(ann))
+            item = QListWidgetItem()
             item.setData(Qt.UserRole, ann.id)
             self._list.addItem(item)
+            row_widget = self._create_row_widget(
+                self._annotation_text(ann),
+                lambda _checked=False, ann_id=ann.id: self.annotation_deleted.emit(ann_id),
+            )
+            item.setSizeHint(row_widget.sizeHint())
+            self._list.setItemWidget(item, row_widget)
 
     def add_annotation(self, annotation: Annotation):
-        item = QListWidgetItem(self._annotation_text(annotation))
+        item = QListWidgetItem()
         item.setData(Qt.UserRole, annotation.id)
         self._list.addItem(item)
+        row_widget = self._create_row_widget(
+            self._annotation_text(annotation),
+            lambda _checked=False, ann_id=annotation.id: self.annotation_deleted.emit(ann_id),
+        )
+        item.setSizeHint(row_widget.sizeHint())
+        self._list.setItemWidget(item, row_widget)
         self._empty_label.hide()
         self._list.show()
 
@@ -246,7 +303,12 @@ class AnnotationListPanel(QWidget):
         for i in range(self._list.count()):
             item = self._list.item(i)
             if item.data(Qt.UserRole) == annotation.id:
-                item.setText(self._annotation_text(annotation))
+                row_widget = self._create_row_widget(
+                    self._annotation_text(annotation),
+                    lambda _checked=False, ann_id=annotation.id: self.annotation_deleted.emit(ann_id),
+                )
+                item.setSizeHint(row_widget.sizeHint())
+                self._list.setItemWidget(item, row_widget)
                 break
 
     def remove_annotation(self, annotation_id: str):
@@ -291,6 +353,8 @@ class AnnotationListPanel(QWidget):
 class DirectTranslationPanel(QWidget):
     """Panel for displaying direct translation history."""
 
+    translation_deleted = Signal(int)  # index
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._setup_ui()
@@ -321,6 +385,10 @@ class DirectTranslationPanel(QWidget):
             }
         """
         )
+        self._list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(
+            self._on_context_menu_requested
+        )
         layout.addWidget(self._list)
 
         self._empty_label = QLabel(
@@ -329,6 +397,63 @@ class DirectTranslationPanel(QWidget):
         self._empty_label.setAlignment(Qt.AlignCenter)
         self._empty_label.setStyleSheet("color: #7f7f7f; padding: 20px;")
         layout.addWidget(self._empty_label)
+
+    def _create_row_widget(self, en_text: str, zh_text: str, on_delete):
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(8, 4, 8, 4)
+        row_layout.setSpacing(6)
+
+        text_container = QWidget()
+        text_layout = QVBoxLayout(text_container)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+
+        en_label = QLabel(f"EN: {self._shorten(en_text, 80)}")
+        en_label.setWordWrap(True)
+        en_label.setStyleSheet("color: #d4d4d4;")
+        text_layout.addWidget(en_label)
+
+        zh_label = QLabel(f"ZH: {self._shorten(zh_text, 100)}")
+        zh_label.setWordWrap(True)
+        zh_label.setStyleSheet("color: #c5e1ff;")
+        text_layout.addWidget(zh_label)
+
+        row_layout.addWidget(text_container, 1)
+
+        delete_btn = QPushButton("")
+        delete_btn.setFixedSize(22, 22)
+        delete_btn.setToolTip("Delete translation")
+        delete_btn.setStyleSheet(
+            """
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #8a8a8a;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #4a2020;
+                border-radius: 4px;
+                color: #f48771;
+            }
+            """
+        )
+        delete_btn.setIcon(_create_text_icon("✕", 18, "#d4d4d4"))
+        delete_btn.setIconSize(QSize(18, 18))
+        delete_btn.clicked.connect(on_delete)
+        row_layout.addWidget(delete_btn)
+
+        row.setContextMenuPolicy(Qt.CustomContextMenu)
+        def _show_row_menu(pos):
+            menu = QMenu(self)
+            delete_action = menu.addAction("Delete Translation")
+            chosen = menu.exec(row.mapToGlobal(pos))
+            if chosen == delete_action:
+                on_delete()
+        row.customContextMenuRequested.connect(_show_row_menu)
+
+        return row
 
     @staticmethod
     def _shorten(text: str, max_len: int) -> str:
@@ -340,22 +465,33 @@ class DirectTranslationPanel(QWidget):
     def set_translations(self, items: List[tuple]):
         self._list.clear()
         for en_text, zh_text in items:
-            self._list.addItem(
-                QListWidgetItem(
-                    f"EN: {self._shorten(en_text, 80)}\nZH: {self._shorten(zh_text, 100)}"
-                )
+            item = QListWidgetItem()
+            self._list.addItem(item)
+            row_widget = self._create_row_widget(
+                en_text,
+                zh_text,
+                lambda _checked=False, it=item: self._emit_delete_for_item(it),
             )
+            row_size = row_widget.sizeHint()
+            row_size.setHeight(max(62, row_size.height()))
+            item.setSizeHint(row_size)
+            self._list.setItemWidget(item, row_widget)
         is_empty = self._list.count() == 0
         self._empty_label.setVisible(is_empty)
         self._list.setVisible(not is_empty)
 
     def add_translation(self, en_text: str, zh_text: str):
-        self._list.insertItem(
-            0,
-            QListWidgetItem(
-                f"EN: {self._shorten(en_text, 80)}\nZH: {self._shorten(zh_text, 100)}"
-            ),
+        item = QListWidgetItem()
+        self._list.insertItem(0, item)
+        row_widget = self._create_row_widget(
+            en_text,
+            zh_text,
+            lambda _checked=False, it=item: self._emit_delete_for_item(it),
         )
+        row_size = row_widget.sizeHint()
+        row_size.setHeight(max(62, row_size.height()))
+        item.setSizeHint(row_size)
+        self._list.setItemWidget(item, row_widget)
         self._empty_label.hide()
         self._list.show()
 
@@ -363,6 +499,25 @@ class DirectTranslationPanel(QWidget):
         self._list.clear()
         self._empty_label.show()
         self._list.hide()
+
+    def _emit_delete_for_item(self, item: QListWidgetItem):
+        idx = self._list.row(item)
+        if idx >= 0:
+            self.translation_deleted.emit(idx)
+
+    def _on_context_menu_requested(self, pos):
+        item = self._list.itemAt(pos)
+        if item is None:
+            return
+        idx = self._list.row(item)
+        if idx < 0:
+            return
+
+        menu = QMenu(self)
+        delete_action = menu.addAction("Delete Translation")
+        chosen = menu.exec(self._list.mapToGlobal(pos))
+        if chosen == delete_action:
+            self.translation_deleted.emit(idx)
 
 
 class SidePanel(QWidget):
@@ -373,6 +528,7 @@ class SidePanel(QWidget):
     bookmark_deleted = Signal(int)
     annotation_selected = Signal(str)
     annotation_deleted = Signal(str)
+    translation_deleted = Signal(int)
     collapse_toggled = Signal(bool)
 
     def __init__(self, parent=None):
@@ -449,6 +605,9 @@ class SidePanel(QWidget):
         self._tabs.addTab(self._annotation_panel, "Annotations")
 
         self._direct_translation_panel = DirectTranslationPanel()
+        self._direct_translation_panel.translation_deleted.connect(
+            self.translation_deleted.emit
+        )
         self._tabs.addTab(self._direct_translation_panel, "Translations")
 
         layout.addWidget(self._tabs)

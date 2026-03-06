@@ -44,6 +44,7 @@ class AnnotationManager(QObject):
         super().__init__(parent)
         self._current_document: str = ""
         self._annotations: dict[str, Annotation] = {}  # id -> Annotation
+        self._direct_translations: list[tuple[str, str]] = []
 
     @property
     def current_document(self) -> str:
@@ -59,6 +60,7 @@ class AnnotationManager(QObject):
         """
         self._current_document = normalize_path(document_path)
         self._annotations.clear()
+        self._direct_translations.clear()
 
         if self._current_document:
             self._load_from_json()
@@ -171,8 +173,32 @@ class AnnotationManager(QObject):
     def clear_document(self):
         """Clear all annotations for current document."""
         self._annotations.clear()
+        self._direct_translations.clear()
         self._save_to_json()
         self.annotations_loaded.emit([])
+
+    def get_direct_translations(self) -> List[tuple[str, str]]:
+        """Get persisted direct translation history for current document."""
+        return list(self._direct_translations)
+
+    def add_direct_translation(self, source_text: str, translated_text: str):
+        """Add one direct translation record and persist."""
+        src = (source_text or "").strip()
+        dst = (translated_text or "").strip()
+        if not src or not dst:
+            return
+
+        self._direct_translations.insert(0, (src, dst))
+        self._direct_translations = self._direct_translations[:200]
+        self._save_to_json()
+
+    def delete_direct_translation(self, index: int) -> bool:
+        """Delete one direct translation by index and persist."""
+        if index < 0 or index >= len(self._direct_translations):
+            return False
+        del self._direct_translations[index]
+        self._save_to_json()
+        return True
 
     # ─── JSON Persistence ─────────────────────────────────────────────────
 
@@ -191,6 +217,20 @@ class AnnotationManager(QObject):
                 ann_data["document_path"] = self._current_document
                 ann = Annotation.from_dict(ann_data)
                 self._annotations[ann.id] = ann
+
+            self._direct_translations.clear()
+            for item in data.get("direct_translations", []):
+                if isinstance(item, dict):
+                    src = str(item.get("source_text", "")).strip()
+                    dst = str(item.get("translated_text", "")).strip()
+                elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                    src = str(item[0]).strip()
+                    dst = str(item[1]).strip()
+                else:
+                    continue
+                if src and dst:
+                    self._direct_translations.append((src, dst))
+            self._direct_translations = self._direct_translations[:200]
 
         except Exception as e:
             print(f"Error loading annotations from {json_path}: {e}")
@@ -211,6 +251,13 @@ class AnnotationManager(QObject):
             data = {
                 "document_path": self._current_document,
                 "annotations": annotations_data,
+                "direct_translations": [
+                    {
+                        "source_text": src,
+                        "translated_text": dst,
+                    }
+                    for src, dst in self._direct_translations
+                ],
             }
 
             with open(json_path, 'w', encoding='utf-8') as f:
