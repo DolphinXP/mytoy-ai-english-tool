@@ -473,13 +473,30 @@ class AnnotationDetailView(QWidget):
 
     def set_explanation(self, text: str):
         self._explanation = text
-        self._explain_display.setMarkdown(text)
+        self._set_explanation_markdown_preserve_scroll(text)
 
     def append_explain_chunk(self, chunk: str):
         if self._explanation == "" or self._explanation == "Explaining...":
             self._explanation = ""
         self._explanation += chunk
-        self._explain_display.setMarkdown(self._explanation)
+        self._set_explanation_markdown_preserve_scroll(self._explanation)
+
+    def _set_explanation_markdown_preserve_scroll(self, markdown: str):
+        """
+        Render markdown while preserving manual scroll position during streaming.
+        If the user is already at the bottom, keep auto-follow behavior.
+        """
+        scrollbar = self._explain_display.verticalScrollBar()
+        prev_value = scrollbar.value()
+        prev_max = scrollbar.maximum()
+        at_bottom = (prev_max - prev_value) <= 2
+
+        self._explain_display.setMarkdown(markdown)
+
+        if at_bottom:
+            scrollbar.setValue(scrollbar.maximum())
+        else:
+            scrollbar.setValue(min(prev_value, scrollbar.maximum()))
 
     def set_status(self, status: str):
         self._status_label.setText(status)
