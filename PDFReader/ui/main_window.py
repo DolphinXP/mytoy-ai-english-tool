@@ -315,7 +315,6 @@ class MainWindow(QMainWindow):
         self._toolbar.zoom_fit_width_toggled.connect(self._on_fit_width_toggled)
         self._toolbar.zoom_fit_window_toggled.connect(self._on_fit_page_toggled)
         self._toolbar.zoom_level_changed.connect(self._on_zoom_level_changed)
-        self._toolbar.regenerate_clicked.connect(self._on_regenerate)
         self._toolbar.toggle_annotations_clicked.connect(
             self._toggle_annotation_panel)
 
@@ -353,6 +352,7 @@ class MainWindow(QMainWindow):
         self._annotation_panel.tts_stop_clicked.connect(self._on_tts_stop)
         self._annotation_panel.tts_settings_clicked.connect(
             self._on_tts_settings)
+        self._annotation_panel.regenerate_clicked.connect(self._on_regenerate)
 
         # Annotation manager
         self._app.annotation_manager.annotations_loaded.connect(

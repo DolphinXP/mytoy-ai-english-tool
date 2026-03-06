@@ -582,6 +582,7 @@ class AnnotationPanel(QWidget):
     tts_play_clicked = Signal()
     tts_stop_clicked = Signal()
     tts_settings_clicked = Signal()
+    regenerate_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -610,6 +611,24 @@ class AnnotationPanel(QWidget):
         self._count_label.setStyleSheet("color: #a0a0a0;")
         header_layout.addWidget(self._count_label)
         header_layout.addStretch()
+
+        self._regenerate_btn = QPushButton("Regenerate")
+        self._regenerate_btn.setToolTip(
+            "Regenerate AI results for selected annotation"
+        )
+        self._regenerate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3c3c3c; color: #d4d4d4;
+                border-radius: 4px; padding: 5px 10px;
+                border: 1px solid #3f3f46; font-size: 12px;
+            }
+            QPushButton:hover { background-color: #414141; }
+            QPushButton:disabled { background-color: #2d2d2d; color: #7f7f7f; }
+        """)
+        self._regenerate_btn.setIcon(_create_text_icon("↻", 20, "#d4d4d4"))
+        self._regenerate_btn.setIconSize(QSize(20, 20))
+        self._regenerate_btn.clicked.connect(self.regenerate_clicked.emit)
+        header_layout.addWidget(self._regenerate_btn)
 
         layout.addWidget(self._header)
 
@@ -780,7 +799,8 @@ class AnnotationPanel(QWidget):
 
     def set_list_visible(self, visible: bool):
         """Show/hide the internal annotation list area."""
-        self._header.setVisible(visible)
+        # Keep the top header visible so actions like Regenerate stay accessible.
+        self._header.setVisible(True)
         self._list_widget.setVisible(visible)
         if visible:
             self._splitter.setSizes([200, 400])

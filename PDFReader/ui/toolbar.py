@@ -46,7 +46,6 @@ class ToolbarWidget(QWidget):
     zoom_fit_width_toggled = Signal(bool)
     zoom_fit_window_toggled = Signal(bool)
     zoom_level_changed = Signal(float)
-    regenerate_clicked = Signal()
     toggle_annotations_clicked = Signal()
 
     def __init__(self, parent=None):
@@ -233,13 +232,6 @@ class ToolbarWidget(QWidget):
 
         layout.addStretch()
 
-        self._regenerate_btn = QPushButton("Regenerate")
-        self._regenerate_btn.setToolTip("Regenerate AI results for selected annotation")
-        self._regenerate_btn.setIcon(_create_text_icon("↻", 22))
-        self._regenerate_btn.setIconSize(QSize(22, 22))
-        self._regenerate_btn.clicked.connect(self.regenerate_clicked.emit)
-        layout.addWidget(self._regenerate_btn)
-
         # Toggle annotation panel button
         self._toggle_annotations_btn = QPushButton("Annotations")
         self._toggle_annotations_btn.setToolTip("Toggle annotation panel")
@@ -323,7 +315,6 @@ class ToolbarWidget(QWidget):
         self._zoom_reset_btn.setEnabled(enabled)
         self._fit_width_btn.setEnabled(enabled)
         self._fit_window_btn.setEnabled(enabled)
-        self._regenerate_btn.setEnabled(enabled)
 
     def set_fit_mode(self, mode: str):
         """Set fit mode check state: 'width', 'page', or None."""
