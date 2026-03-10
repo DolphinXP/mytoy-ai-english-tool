@@ -1,7 +1,7 @@
 """
 Context menu for text selection actions.
 """
-from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QMenu, QApplication
 from PySide6.QtCore import Signal, QObject, QPoint
 from PySide6.QtGui import QAction
 
@@ -45,7 +45,14 @@ class TextContextMenu(QObject):
                 margin: 4px 8px;
             }
         """)
-        
+
+        # Copy action
+        self._copy_action = QAction("Copy", self._menu)
+        self._copy_action.triggered.connect(self._on_copy_selected)
+        self._menu.addAction(self._copy_action)
+
+        self._menu.addSeparator()
+
         # Direct translate action
         self._translate_to_chinese_action = QAction("To Chinese", self._menu)
         self._translate_to_chinese_action.triggered.connect(
@@ -73,6 +80,7 @@ class TextContextMenu(QObject):
         """Show context menu at position with selected text."""
         self._selected_text = text
         has_text = bool(text and text.strip())
+        self._copy_action.setEnabled(has_text)
         self._mark_action.setEnabled(has_text)
         self._add_bookmark_action.setEnabled(has_text)
         self._translate_to_chinese_action.setEnabled(has_text)
@@ -94,3 +102,8 @@ class TextContextMenu(QObject):
     def _on_tts_play(self):
         if self._selected_text:
             self.tts_play_clicked.emit(self._selected_text)
+
+    def _on_copy_selected(self):
+        text = (self._selected_text or "").strip()
+        if text:
+            QApplication.clipboard().setText(text)

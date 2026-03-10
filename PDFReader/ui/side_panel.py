@@ -4,6 +4,7 @@ from typing import List
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 from PySide6.QtWidgets import (
+    QApplication,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -445,12 +446,15 @@ class DirectTranslationPanel(QWidget):
         row_layout.addWidget(delete_btn)
 
         row.setContextMenuPolicy(Qt.CustomContextMenu)
+
         def _show_row_menu(pos):
-            menu = QMenu(self)
-            delete_action = menu.addAction("Delete Translation")
-            chosen = menu.exec(row.mapToGlobal(pos))
-            if chosen == delete_action:
-                on_delete()
+            parent_item = self._find_item_for_row(row)
+            if parent_item is None:
+                return
+            self._show_translation_context_menu(
+                row.mapToGlobal(pos), parent_item
+            )
+
         row.customContextMenuRequested.connect(_show_row_menu)
 
         return row
@@ -466,6 +470,8 @@ class DirectTranslationPanel(QWidget):
         self._list.clear()
         for en_text, zh_text in items:
             item = QListWidgetItem()
+            item.setData(Qt.UserRole, en_text)
+            item.setData(Qt.UserRole + 1, zh_text)
             self._list.addItem(item)
             row_widget = self._create_row_widget(
                 en_text,
@@ -482,6 +488,8 @@ class DirectTranslationPanel(QWidget):
 
     def add_translation(self, en_text: str, zh_text: str):
         item = QListWidgetItem()
+        item.setData(Qt.UserRole, en_text)
+        item.setData(Qt.UserRole + 1, zh_text)
         self._list.insertItem(0, item)
         row_widget = self._create_row_widget(
             en_text,
@@ -509,15 +517,54 @@ class DirectTranslationPanel(QWidget):
         item = self._list.itemAt(pos)
         if item is None:
             return
+
+        self._show_translation_context_menu(self._list.mapToGlobal(pos), item)
+
+    def _show_translation_context_menu(self, global_pos, item: QListWidgetItem):
         idx = self._list.row(item)
         if idx < 0:
             return
 
+        en_text = str(item.data(Qt.UserRole) or "")
+        zh_text = str(item.data(Qt.UserRole + 1) or "")
+
         menu = QMenu(self)
+        copy_menu = menu.addMenu("Copy")
+        copy_en_action = copy_menu.addAction("Copy Source (EN)")
+        copy_zh_action = copy_menu.addAction("Copy Translation (ZH)")
+        copy_both_action = copy_menu.addAction("Copy Both")
+        menu.addSeparator()
         delete_action = menu.addAction("Delete Translation")
-        chosen = menu.exec(self._list.mapToGlobal(pos))
-        if chosen == delete_action:
+
+        has_en = bool(en_text.strip())
+        has_zh = bool(zh_text.strip())
+        copy_en_action.setEnabled(has_en)
+        copy_zh_action.setEnabled(has_zh)
+        copy_both_action.setEnabled(has_en or has_zh)
+
+        chosen = menu.exec(global_pos)
+        if chosen == copy_en_action:
+            QApplication.clipboard().setText(en_text.strip())
+        elif chosen == copy_zh_action:
+            QApplication.clipboard().setText(zh_text.strip())
+        elif chosen == copy_both_action:
+            if has_en and has_zh:
+                QApplication.clipboard().setText(
+                    f"EN: {en_text.strip()}\nZH: {zh_text.strip()}"
+                )
+            elif has_en:
+                QApplication.clipboard().setText(en_text.strip())
+            elif has_zh:
+                QApplication.clipboard().setText(zh_text.strip())
+        elif chosen == delete_action:
             self.translation_deleted.emit(idx)
+
+    def _find_item_for_row(self, row: QWidget):
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if self._list.itemWidget(item) is row:
+                return item
+        return None
 
 
 class SidePanel(QWidget):
