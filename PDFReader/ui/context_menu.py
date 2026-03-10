@@ -12,6 +12,7 @@ class TextContextMenu(QObject):
     mark_clicked = Signal(str)  # selected_text
     add_bookmark_clicked = Signal(str)  # selected_text
     translate_to_chinese_clicked = Signal(str)  # selected_text
+    translate_to_chinese_without_correction_clicked = Signal(str)  # selected_text
     tts_play_clicked = Signal(str)  # selected_text
 
     def __init__(self, parent=None):
@@ -53,12 +54,23 @@ class TextContextMenu(QObject):
 
         self._menu.addSeparator()
 
-        # Direct translate action
-        self._translate_to_chinese_action = QAction("To Chinese", self._menu)
+        # Translation actions
+        self._translate_to_chinese_without_correction_action = QAction(
+            "Translate without Correction", self._menu
+        )
+        self._translate_to_chinese_without_correction_action.triggered.connect(
+            self._on_translate_to_chinese_without_correction
+        )
+        self._menu.addAction(self._translate_to_chinese_without_correction_action)
+
+        self._translate_to_chinese_action = QAction(
+            "Correct then Translate", self._menu
+        )
         self._translate_to_chinese_action.triggered.connect(
             self._on_translate_to_chinese
         )
         self._menu.addAction(self._translate_to_chinese_action)
+        self._menu.addSeparator()
 
         # Mark action - creates annotation with selected text
         self._mark_action = QAction("Mark Selection", self._menu)
@@ -84,6 +96,7 @@ class TextContextMenu(QObject):
         self._mark_action.setEnabled(has_text)
         self._add_bookmark_action.setEnabled(has_text)
         self._translate_to_chinese_action.setEnabled(has_text)
+        self._translate_to_chinese_without_correction_action.setEnabled(has_text)
         self._tts_action.setEnabled(has_text)
         self._menu.popup(pos)
 
@@ -98,6 +111,12 @@ class TextContextMenu(QObject):
     def _on_translate_to_chinese(self):
         if self._selected_text:
             self.translate_to_chinese_clicked.emit(self._selected_text)
+
+    def _on_translate_to_chinese_without_correction(self):
+        if self._selected_text:
+            self.translate_to_chinese_without_correction_clicked.emit(
+                self._selected_text
+            )
 
     def _on_tts_play(self):
         if self._selected_text:

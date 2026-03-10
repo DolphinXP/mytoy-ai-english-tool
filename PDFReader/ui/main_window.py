@@ -370,6 +370,9 @@ class MainWindow(QMainWindow):
             self._on_add_bookmark_from_selection)
         self._context_menu.translate_to_chinese_clicked.connect(
             self._on_quick_translate_to_chinese)
+        self._context_menu.translate_to_chinese_without_correction_clicked.connect(
+            self._on_quick_translate_to_chinese_without_correction
+        )
         self._context_menu.tts_play_clicked.connect(
             self._on_quick_tts_from_selection
         )
@@ -781,6 +784,27 @@ class MainWindow(QMainWindow):
         )
         self._quick_translate_correction_thread = correction_thread
         correction_thread.start()
+
+    def _on_quick_translate_to_chinese_without_correction(self, selected_text: str):
+        if not self._app.is_document_loaded or not selected_text.strip():
+            return
+
+        # Stop previous quick translation tasks.
+        if (
+            self._quick_translate_correction_thread
+            and self._quick_translate_correction_thread.isRunning()
+        ):
+            self._quick_translate_correction_thread.stop()
+            self._quick_translate_correction_thread.wait(500)
+        if self._quick_translate_thread and self._quick_translate_thread.isRunning():
+            self._quick_translate_thread.stop()
+            self._quick_translate_thread.wait(500)
+
+        anchor = self._quick_translate_anchor_global
+        if anchor.isNull() and self._current_selection_rect:
+            anchor = self._selection_anchor_global(self._current_selection_rect)
+
+        self._start_quick_translation(selected_text, selected_text, anchor)
 
     def _on_quick_translation_done(
         self, source_text: str, corrected_text: str, translated_text: str, anchor: QPoint

@@ -440,7 +440,7 @@ class DirectTranslationPanel(QWidget):
         layout.addWidget(self._list)
 
         self._empty_label = QLabel(
-            "No direct translations yet.\nUse context menu 'To Chinese'."
+            "No direct translations yet.\nUse context menu 'Translate'."
         )
         self._empty_label.setAlignment(Qt.AlignCenter)
         self._empty_label.setStyleSheet("color: #7f7f7f; padding: 20px;")
