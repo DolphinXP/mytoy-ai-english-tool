@@ -50,6 +50,7 @@ class BookmarkPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._bookmarks: List[tuple] = []
+        self._current_page: int = 0
         self._setup_ui()
 
     def _setup_ui(self):
@@ -130,6 +131,52 @@ class BookmarkPanel(QWidget):
             level_stack.append(item)
 
         self._tree.expandAll()
+        self._update_active_bookmark()
+
+    def set_current_page(self, page_number: int):
+        """Highlight bookmark that best matches the current page."""
+        self._current_page = max(0, int(page_number))
+        self._update_active_bookmark()
+
+    def _collect_tree_items(self) -> List[QTreeWidgetItem]:
+        items: List[QTreeWidgetItem] = []
+        stack = [
+            self._tree.topLevelItem(i)
+            for i in range(self._tree.topLevelItemCount())
+        ]
+        while stack:
+            item = stack.pop()
+            if item is None:
+                continue
+            items.append(item)
+            for i in range(item.childCount() - 1, -1, -1):
+                stack.append(item.child(i))
+        return items
+
+    def _update_active_bookmark(self):
+        if not self._bookmarks or self._tree.topLevelItemCount() == 0:
+            self._tree.setCurrentItem(None)
+            return
+
+        selected_item = None
+        selected_page = -1
+        for item in self._collect_tree_items():
+            page = item.data(0, Qt.UserRole)
+            if page is None:
+                continue
+            try:
+                page = int(page)
+            except (TypeError, ValueError):
+                continue
+            if page <= self._current_page and page >= selected_page:
+                selected_item = item
+                selected_page = page
+
+        if selected_item is None:
+            selected_item = self._tree.topLevelItem(0)
+
+        self._tree.setCurrentItem(selected_item)
+        self._tree.scrollToItem(selected_item)
 
     def _on_item_clicked(self, item: QTreeWidgetItem, _column: int):
         page = item.data(0, Qt.UserRole)
@@ -681,6 +728,9 @@ class SidePanel(QWidget):
 
     def set_bookmarks(self, bookmarks: List[tuple]):
         self._bookmark_panel.set_bookmarks(bookmarks)
+
+    def set_current_page(self, page_number: int):
+        self._bookmark_panel.set_current_page(page_number)
 
     def set_annotations(self, annotations: List[Annotation]):
         self._annotation_panel.set_annotations(annotations)

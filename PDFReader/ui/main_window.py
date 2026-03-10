@@ -535,6 +535,7 @@ class MainWindow(QMainWindow):
 
     def _on_page_changed(self, page: int):
         self._toolbar.set_current_page(page)
+        self._side_panel.set_current_page(page)
         self._clear_selection()
         self._render_current_page()
         self._update_page_highlights()
@@ -968,6 +969,7 @@ class MainWindow(QMainWindow):
     def _refresh_bookmark_panel(self):
         self._bookmarks = self._sort_bookmarks(self._bookmarks)
         self._side_panel.set_bookmarks(self._bookmarks)
+        self._side_panel.set_current_page(self._app.current_page)
 
     def _persist_current_bookmarks(self):
         file_path = self._app.pdf_service.file_path
