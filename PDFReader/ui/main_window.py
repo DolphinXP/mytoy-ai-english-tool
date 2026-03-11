@@ -75,6 +75,7 @@ class MainWindow(QMainWindow):
         self._pending_boundary_scroll: Optional[str] = None
         self._bookmarks_by_doc: Dict[str, List[Tuple[str, int, int]]] = {}
         self._bookmarks: List[Tuple[str, int, int]] = []
+        self._direct_translation_api_profile: str = "deepseek"
         self._recent_docs: List[str] = self._load_history()
         # Audio player for TTS
         self._audio_player = FileAudioPlayer()
@@ -132,7 +133,94 @@ class MainWindow(QMainWindow):
         self._history_menu = self._file_menu.addMenu("Recent &Documents")
         self._history_menu.setStyleSheet(menu_style)
         self._rebuild_history_menu()
+
+        self._file_menu.addSeparator()
+        direct_translate_api_action = QAction("Direct Translation API...", self)
+        direct_translate_api_action.triggered.connect(
+            self._show_direct_translation_api_settings
+        )
+        self._file_menu.addAction(direct_translate_api_action)
+
         self._toolbar.set_file_menu(self._file_menu)
+
+    @staticmethod
+    def _direct_translation_api_choices() -> List[Tuple[str, str]]:
+        """Return available API profiles for direct translation."""
+        return [
+            ("Current (DeepSeek)", "deepseek"),
+            ("Ollama (10.110.31.157)", "ollama_translate"),
+        ]
+
+    def _show_direct_translation_api_settings(self):
+        """Show settings dialog for quick/direct translation API endpoint."""
+        from PySide6.QtWidgets import (
+            QDialog, QVBoxLayout, QFormLayout, QComboBox, QLabel, QDialogButtonBox
+        )
+        from utils.config import get_api_config
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Direct Translation API")
+        dialog.setFixedWidth(520)
+        dialog.setStyleSheet("""
+            QDialog { background-color: #252526; color: #d4d4d4; }
+            QLabel { color: #d4d4d4; }
+            QComboBox {
+                background-color: #3c3c3c; color: #d4d4d4;
+                border: 1px solid #3f3f46; border-radius: 4px; padding: 4px;
+            }
+        """)
+
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        profile_combo = QComboBox(dialog)
+        details_label = QLabel(dialog)
+        details_label.setWordWrap(True)
+
+        for label, key in self._direct_translation_api_choices():
+            profile_combo.addItem(label, key)
+
+        current_index = max(
+            0,
+            profile_combo.findData(self._direct_translation_api_profile)
+        )
+        profile_combo.setCurrentIndex(current_index)
+
+        def _refresh_details():
+            key = str(profile_combo.currentData() or "deepseek")
+            cfg = get_api_config(key)
+            endpoint = cfg.get("endpoint", "")
+            model = cfg.get("model", "")
+            details_label.setText(f"Endpoint: {endpoint}\nModel: {model}")
+
+        profile_combo.currentIndexChanged.connect(_refresh_details)
+        _refresh_details()
+
+        form.addRow("Profile:", profile_combo)
+        form.addRow("Details:", details_label)
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.setStyleSheet("""
+            QPushButton { background-color: #0e639c; color: white; border: none; padding: 6px 16px; border-radius: 4px; }
+            QPushButton:hover { background-color: #1177bb; }
+        """)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        selected_key = str(profile_combo.currentData() or "deepseek")
+        if selected_key not in {"deepseek", "ollama_translate"}:
+            selected_key = "deepseek"
+
+        if selected_key != self._direct_translation_api_profile:
+            self._direct_translation_api_profile = selected_key
+            self._save_history()
+            selected_label = profile_combo.currentText()
+            self._status_bar.set_status(f"Direct translation API: {selected_label}")
+            QTimer.singleShot(2000, self._status_bar.clear_status)
 
     def _rebuild_history_menu(self):
         """Rebuild the history submenu with recent documents."""
@@ -198,6 +286,11 @@ class MainWindow(QMainWindow):
                         # New format with last_dir and view positions
                         self._last_open_dir = data.get("last_dir", "")
                         self._view_positions = data.get("view_positions", {})
+                        profile = data.get("direct_translation_api_profile", "deepseek")
+                        if profile in {"deepseek", "ollama_translate"}:
+                            self._direct_translation_api_profile = profile
+                        else:
+                            self._direct_translation_api_profile = "deepseek"
                         raw_bookmarks = data.get("bookmarks", {})
                         if isinstance(raw_bookmarks, dict):
                             self._bookmarks_by_doc = {
@@ -219,6 +312,7 @@ class MainWindow(QMainWindow):
                 "recent": self._recent_docs,
                 "last_dir": self._last_open_dir,
                 "view_positions": getattr(self, '_view_positions', {}),
+                "direct_translation_api_profile": self._direct_translation_api_profile,
                 "bookmarks": {
                     path: self._serialize_bookmarks(bookmarks)
                     for path, bookmarks in self._bookmarks_by_doc.items()
@@ -821,6 +915,14 @@ class MainWindow(QMainWindow):
     def _on_quick_translation_error(self, error: str, anchor: QPoint):
         self._quick_translate_popup.set_error(anchor, error)
 
+    def _on_quick_translation_chunk(self, chunk: str, anchor: QPoint):
+        """Render direct-translation chunks incrementally in popup."""
+        if not chunk:
+            return
+        if not self._quick_translate_popup.isVisible():
+            self._quick_translate_popup.start_streaming(anchor)
+        self._quick_translate_popup.append_stream_chunk(chunk)
+
     def _on_direct_translation_delete_requested(self, index: int):
         if index < 0 or index >= len(self._direct_translations):
             return
@@ -887,7 +989,11 @@ class MainWindow(QMainWindow):
 
         thread = TranslationThread(
             text_to_translate=text_to_translate,
+            api_config=self._direct_translation_api_profile,
             context_text=context_text,
+        )
+        thread.translation_chunk.connect(
+            lambda chunk, a=anchor: self._on_quick_translation_chunk(chunk, a)
         )
         thread.translation_done.connect(
             lambda result, src=source_text, corr=text_to_translate, a=anchor: self._on_quick_translation_done(

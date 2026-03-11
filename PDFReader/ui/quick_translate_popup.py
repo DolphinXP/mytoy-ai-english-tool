@@ -1,5 +1,6 @@
 """Floating popup for quick translation results."""
 from PySide6.QtCore import Qt, QPoint, Signal
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QVBoxLayout,
@@ -91,6 +92,21 @@ class QuickTranslatePopup(QFrame):
         self._title.setText("Translation")
         self._text.setPlainText("Translating...")
         self._show_above(anchor_global)
+
+    def start_streaming(self, anchor_global: QPoint):
+        """Prepare popup for incremental translation output."""
+        self._title.setText("Translation (Chinese)")
+        self._text.clear()
+        self._show_above(anchor_global)
+
+    def append_stream_chunk(self, chunk: str):
+        """Append one streamed chunk without repositioning the popup."""
+        if not chunk:
+            return
+        cursor = self._text.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(chunk)
+        self._text.setTextCursor(cursor)
 
     def show_correcting(self, anchor_global: QPoint):
         self._title.setText("Translation")

@@ -12,6 +12,14 @@ default_configs = {
         'timeout': 60.0,
         'verify_ssl': True
     },
+    'ollama_translate': {
+        'endpoint': "http://10.110.31.157:11434/v1",
+        'key': "ollama",
+        'model': "qwen3.5:9b",
+        'proxy': None,
+        'timeout': 120.0,
+        'verify_ssl': False
+    },
 }
 
 
