@@ -1,7 +1,7 @@
 """
 PDF document handling service using PyMuPDF.
 """
-from typing import Optional, Tuple, List, Any
+from typing import Optional, Tuple, List, Any, Dict
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -18,6 +18,9 @@ class PDFService:
         """Initialize PDF service."""
         self._document: Optional[fitz.Document] = None
         self._file_path: str = ""
+        # OCR cache keyed by page number to avoid expensive repeated OCR passes.
+        self._ocr_words_cache: Dict[int, List[Tuple]] = {}
+        self._ocr_attempted_pages: set[int] = set()
 
     @property
     def is_loaded(self) -> bool:
@@ -66,6 +69,77 @@ class PDFService:
             self._document.close()
             self._document = None
             self._file_path = ""
+        self._ocr_words_cache.clear()
+        self._ocr_attempted_pages.clear()
+
+    def _run_page_ocr_words(self, page_number: int) -> List[Tuple]:
+        """
+        Run OCR for a page and return word-level tuples.
+
+        Returns:
+            List of word tuples in the same shape as page.get_text("words")
+        """
+        if not self._document or page_number < 0 or page_number >= self.page_count:
+            return []
+        if page_number in self._ocr_words_cache:
+            return self._ocr_words_cache[page_number]
+        if page_number in self._ocr_attempted_pages:
+            return []
+
+        self._ocr_attempted_pages.add(page_number)
+        page = self._document[page_number]
+
+        try:
+            # PyMuPDF OCR API. This requires Tesseract to be available.
+            try:
+                textpage = page.get_textpage_ocr(full=True, dpi=200)
+            except TypeError:
+                # Compatibility fallback for older PyMuPDF signatures.
+                textpage = page.get_textpage_ocr(dpi=200)
+            words = textpage.extractWORDS() if textpage else []
+            if words:
+                words = sorted(words, key=lambda w: (w[5], w[6], w[7]))
+                self._ocr_words_cache[page_number] = words
+                return words
+        except Exception as e:
+            # OCR may be unavailable in the runtime environment; fail gracefully.
+            print(f"OCR unavailable for page {page_number}: {e}")
+
+        self._ocr_words_cache[page_number] = []
+        return []
+
+    @staticmethod
+    def _chars_from_words(words: List[Tuple]) -> List[Tuple]:
+        """
+        Build character-level tuples from word-level tuples.
+
+        This uses proportional slicing inside each word bbox when only
+        OCR word boxes are available.
+        """
+        chars: List[Tuple] = []
+        line_char_no: Dict[Tuple[int, int], int] = {}
+
+        for w in words:
+            if len(w) < 8:
+                continue
+            x0, y0, x1, y1, text, block_no, line_no, _word_no = w[:8]
+            word_text = str(text or "")
+            if not word_text:
+                continue
+            key = (int(block_no), int(line_no))
+            cur_char_no = line_char_no.get(key, 0)
+            width = max(0.0, float(x1) - float(x0))
+            step = width / max(1, len(word_text))
+            for i, c in enumerate(word_text):
+                cx0 = float(x0) + i * step
+                cx1 = float(x0) + (i + 1) * step
+                chars.append(
+                    (cx0, float(y0), cx1, float(y1), c, int(block_no), int(line_no), cur_char_no)
+                )
+                cur_char_no += 1
+            line_char_no[key] = cur_char_no
+
+        return sorted(chars, key=lambda c: (c[5], c[6], c[7]))
 
     def get_page(self, page_number: int) -> Optional[fitz.Page]:
         """
@@ -257,6 +331,9 @@ class PDFService:
 
         try:
             words = page.get_text("words")
+            if not words:
+                # Scanned / image-only PDF: fall back to OCR words.
+                words = self._run_page_ocr_words(page_number)
             # Sort by reading order: block, line, word
             return sorted(words, key=lambda w: (w[5], w[6], w[7]))
         except Exception as e:
@@ -317,7 +394,13 @@ class PDFService:
                             )
                             line_char_no += 1
 
-            return sorted(chars, key=lambda c: (c[5], c[6], c[7]))
+            chars = sorted(chars, key=lambda c: (c[5], c[6], c[7]))
+            if chars:
+                return chars
+
+            # Scanned / image-only PDF: fall back to OCR words -> chars.
+            ocr_words = self._run_page_ocr_words(page_number)
+            return self._chars_from_words(ocr_words)
         except Exception as e:
             print(f"Error getting text chars: {e}")
             return []
