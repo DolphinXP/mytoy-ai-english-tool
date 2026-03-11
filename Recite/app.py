@@ -1,0 +1,341 @@
+from __future__ import annotations
+
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+from PySide6.QtCore import QSettings, QStandardPaths, QTimer, Qt, QUrl
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+
+AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".flac", ".ogg")
+TIMESTAMP_PATTERN = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]")
+
+
+@dataclass(frozen=True)
+class LyricLine:
+    start_ms: int
+    text: str
+
+
+class ReciteWindow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Recite Player")
+        self.resize(980, 700)
+        self.settings = QSettings("AI-TTS", "RecitePlayer")
+
+        self.audio_path: Path | None = None
+        self.lrc_path: Path | None = None
+        self.lyrics: list[LyricLine] = []
+        self.current_index: int = -1
+
+        self.audio_output = QAudioOutput(self)
+        self.player = QMediaPlayer(self)
+        self.player.setAudioOutput(self.audio_output)
+
+        self.stop_timer = QTimer(self)
+        self.stop_timer.setInterval(20)
+        self.stop_timer.timeout.connect(self._check_line_end)
+
+        self._build_ui()
+        self._bind_shortcuts()
+
+    def _build_ui(self) -> None:
+        root = QWidget(self)
+        self.setCentralWidget(root)
+
+        layout = QVBoxLayout(root)
+
+        top_row = QHBoxLayout()
+        self.file_label = QLabel("Select an MP3 or LRC file to start.")
+        self.file_label.setWordWrap(True)
+        open_button = QPushButton("Open File")
+        open_button.clicked.connect(self.open_file)
+        self.show_text_checkbox = QCheckBox("Show Original Text")
+        self.show_text_checkbox.setChecked(False)
+        self.show_text_checkbox.toggled.connect(self.refresh_lyrics_display)
+
+        top_row.addWidget(open_button)
+        top_row.addWidget(self.show_text_checkbox)
+        top_row.addStretch(1)
+        layout.addLayout(top_row)
+        layout.addWidget(self.file_label)
+
+        self.current_line_label = QLabel("")
+        self.current_line_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.current_line_label.setWordWrap(True)
+        self.current_line_label.setMinimumHeight(100)
+        self.current_line_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.current_line_label.setStyleSheet(
+            "font-size: 24px; font-weight: 600; padding: 8px;")
+        layout.addWidget(self.current_line_label)
+
+        self.lyrics_list = QListWidget()
+        self.lyrics_list.setWordWrap(True)
+        self.lyrics_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.lyrics_list.itemDoubleClicked.connect(
+            self._on_item_double_clicked)
+        layout.addWidget(self.lyrics_list)
+
+        controls = QHBoxLayout()
+        self.prev_button = QPushButton("Previous (↑)")
+        self.replay_button = QPushButton("Replay (Space)")
+        self.next_button = QPushButton("Next (↓)")
+
+        self.prev_button.clicked.connect(self.play_previous_line)
+        self.replay_button.clicked.connect(self.replay_current_line)
+        self.next_button.clicked.connect(self.play_next_line)
+        self.speed_label = QLabel("Speed: 1.00x")
+        self.speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self.speed_slider.setRange(50, 150)
+        self.speed_slider.setValue(100)
+        self.speed_slider.setFixedWidth(180)
+        self.speed_slider.valueChanged.connect(self._on_speed_changed)
+
+        controls.addWidget(self.prev_button)
+        controls.addWidget(self.replay_button)
+        controls.addWidget(self.next_button)
+        controls.addStretch(1)
+        controls.addWidget(self.speed_label)
+        controls.addWidget(self.speed_slider)
+        layout.addLayout(controls)
+
+    def _on_speed_changed(self, value: int) -> None:
+        rate = value / 100.0
+        self.player.setPlaybackRate(rate)
+        self.speed_label.setText(f"Speed: {rate:.2f}x")
+
+    def _bind_shortcuts(self) -> None:
+        QShortcut(QKeySequence(Qt.Key.Key_Up), self,
+                  activated=self.play_previous_line)
+        QShortcut(QKeySequence(Qt.Key.Key_Down),
+                  self, activated=self.play_next_line)
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self,
+                  activated=self.replay_current_line)
+
+    def open_file(self) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Audio or LRC File",
+            self._initial_open_dir(),
+            "Audio/LRC Files (*.mp3 *.wav *.m4a *.flac *.ogg *.lrc);;All Files (*)",
+        )
+        if not selected:
+            return
+
+        chosen = Path(selected)
+        self._save_last_open_dir(chosen.parent)
+        pair = self._find_pair(chosen)
+        if pair is None:
+            QMessageBox.warning(
+                self,
+                "Missing Corresponding File",
+                "Cannot find a matching MP3/LRC file with the same name in this folder.",
+            )
+            return
+
+        audio_file, lrc_file = pair
+        self._load_pair(audio_file, lrc_file)
+
+    def _initial_open_dir(self) -> str:
+        saved_dir = self.settings.value("last_open_dir", "", str)
+        if saved_dir and Path(saved_dir).exists():
+            return saved_dir
+
+        docs_dir = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation)
+        if docs_dir and Path(docs_dir).exists():
+            return docs_dir
+
+        return str(Path.home())
+
+    def _save_last_open_dir(self, folder: Path) -> None:
+        if folder.exists():
+            self.settings.setValue("last_open_dir", str(folder))
+
+    def _find_pair(self, selected_path: Path) -> tuple[Path, Path] | None:
+        suffix = selected_path.suffix.lower()
+        stem_path = selected_path.with_suffix("")
+
+        if suffix == ".lrc":
+            for ext in AUDIO_EXTENSIONS:
+                candidate_audio = stem_path.with_suffix(ext)
+                if candidate_audio.exists():
+                    return candidate_audio, selected_path
+            return None
+
+        if suffix in AUDIO_EXTENSIONS:
+            candidate_lrc = stem_path.with_suffix(".lrc")
+            if candidate_lrc.exists():
+                return selected_path, candidate_lrc
+            return None
+
+        return None
+
+    def _load_pair(self, audio_file: Path, lrc_file: Path) -> None:
+        lyrics = self._parse_lrc(lrc_file)
+        if not lyrics:
+            QMessageBox.warning(
+                self,
+                "No Timed Lines",
+                "The selected LRC file has no lines starting with valid timestamps.",
+            )
+            return
+
+        self.audio_path = audio_file
+        self.lrc_path = lrc_file
+        self.lyrics = lyrics
+        self.current_index = 0
+
+        self.player.setSource(QUrl.fromLocalFile(str(audio_file)))
+        self.player.pause()
+
+        self.file_label.setText(
+            f"Audio: {audio_file.name}    LRC: {lrc_file.name}")
+        self.refresh_lyrics_display()
+        self._select_index(0)
+        self.replay_current_line()
+
+    def _parse_lrc(self, lrc_file: Path) -> list[LyricLine]:
+        parsed_lines: list[LyricLine] = []
+        for raw_line in lrc_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            matches = list(TIMESTAMP_PATTERN.finditer(raw_line))
+            if not matches or matches[0].start() != 0:
+                continue
+
+            text = raw_line[matches[-1].end():].strip()
+            for m in matches:
+                start_ms = self._timestamp_to_ms(
+                    m.group(1), m.group(2), m.group(3))
+                parsed_lines.append(LyricLine(start_ms=start_ms, text=text))
+
+        parsed_lines.sort(key=lambda x: x.start_ms)
+        return parsed_lines
+
+    @staticmethod
+    def _timestamp_to_ms(minutes: str, seconds: str, fraction: str | None) -> int:
+        mm = int(minutes)
+        ss = int(seconds)
+        frac = fraction or "0"
+        if len(frac) == 1:
+            ms = int(frac) * 100
+        elif len(frac) == 2:
+            ms = int(frac) * 10
+        else:
+            ms = int(frac[:3])
+        return (mm * 60 + ss) * 1000 + ms
+
+    def refresh_lyrics_display(self) -> None:
+        self.lyrics_list.clear()
+        show_text = self.show_text_checkbox.isChecked()
+        for idx, line in enumerate(self.lyrics):
+            ts = self._format_ms(line.start_ms)
+            line_text = f"{ts}  {line.text}" if show_text else ts
+            item = QListWidgetItem(line_text)
+            item.setData(Qt.ItemDataRole.UserRole, idx)
+            self.lyrics_list.addItem(item)
+
+        if 0 <= self.current_index < len(self.lyrics):
+            self._select_index(self.current_index)
+
+    @staticmethod
+    def _format_ms(ms: int) -> str:
+        total_seconds = ms // 1000
+        mm = total_seconds // 60
+        ss = total_seconds % 60
+        cc = (ms % 1000) // 10
+        return f"[{mm:02d}:{ss:02d}.{cc:02d}]"
+
+    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
+        index = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(index, int):
+            self.current_index = index
+            self._select_index(index)
+            self.replay_current_line()
+
+    def _select_index(self, index: int) -> None:
+        if not (0 <= index < len(self.lyrics)):
+            return
+
+        self.current_index = index
+        self.lyrics_list.setCurrentRow(index)
+
+        if self.show_text_checkbox.isChecked():
+            self.current_line_label.setText(self.lyrics[index].text)
+        else:
+            self.current_line_label.setText("")
+
+    def _line_end_ms(self, index: int) -> int:
+        if index + 1 < len(self.lyrics):
+            return self.lyrics[index + 1].start_ms
+
+        duration = self.player.duration()
+        if duration > self.lyrics[index].start_ms:
+            return duration
+        return self.lyrics[index].start_ms + 4000
+
+    def replay_current_line(self) -> None:
+        if not self.lyrics:
+            return
+        if self.current_index < 0:
+            self.current_index = 0
+
+        self._select_index(self.current_index)
+        start_ms = self.lyrics[self.current_index].start_ms
+        self.player.setPosition(start_ms)
+        self.player.play()
+        self.stop_timer.start()
+
+    def play_next_line(self) -> None:
+        if not self.lyrics:
+            return
+        next_index = min(self.current_index + 1, len(self.lyrics) - 1)
+        self.current_index = next_index
+        self.replay_current_line()
+
+    def play_previous_line(self) -> None:
+        if not self.lyrics:
+            return
+        prev_index = max(self.current_index - 1, 0)
+        self.current_index = prev_index
+        self.replay_current_line()
+
+    def _check_line_end(self) -> None:
+        if not self.lyrics or self.current_index < 0:
+            self.stop_timer.stop()
+            return
+
+        if self.player.position() >= self._line_end_ms(self.current_index):
+            self.player.pause()
+            self.stop_timer.stop()
+
+
+def main() -> int:
+    app = QApplication(sys.argv)
+    window = ReciteWindow()
+    window.show()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
