@@ -27,7 +27,12 @@ from PySide6.QtWidgets import (
 )
 
 AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".flac", ".ogg")
+SUBTITLE_EXTENSIONS = (".lrc", ".vtt")
+TAIL_SEEK_SAFETY_MS = 250
 TIMESTAMP_PATTERN = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]")
+VTT_CUE_TIMING_PATTERN = re.compile(
+    r"^\s*((?:\d{2}:)?\d{2}:\d{2}[.,]\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}[.,]\d{3})(?:\s+.*)?\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -44,7 +49,7 @@ class ReciteWindow(QMainWindow):
         self.settings = QSettings("AI-TTS", "RecitePlayer")
 
         self.audio_path: Path | None = None
-        self.lrc_path: Path | None = None
+        self.subtitle_path: Path | None = None
         self.lyrics: list[LyricLine] = []
         self.current_index: int = -1
         self.continuous_mode: bool = False
@@ -74,7 +79,7 @@ class ReciteWindow(QMainWindow):
         layout = QVBoxLayout(root)
 
         top_row = QHBoxLayout()
-        self.file_label = QLabel("Select an MP3 or LRC file to start.")
+        self.file_label = QLabel("Select an audio or subtitle file to start.")
         self.file_label.setWordWrap(True)
         open_button = QPushButton("Open File")
         open_button.clicked.connect(self.open_file)
@@ -174,9 +179,9 @@ class ReciteWindow(QMainWindow):
     def open_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Audio or LRC File",
+            "Select Audio or Subtitle File",
             self._initial_open_dir(),
-            "Audio/LRC Files (*.mp3 *.wav *.m4a *.flac *.ogg *.lrc);;All Files (*)",
+            "Audio/Subtitle Files (*.mp3 *.wav *.m4a *.flac *.ogg *.lrc *.vtt);;All Files (*)",
         )
         if not selected:
             return
@@ -188,12 +193,12 @@ class ReciteWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Missing Corresponding File",
-                "Cannot find a matching MP3/LRC file with the same name in this folder.",
+                "Cannot find matching audio/subtitle files with the same name in this folder.",
             )
             return
 
-        audio_file, lrc_file = pair
-        self._load_pair(audio_file, lrc_file)
+        audio_file, subtitle_file = pair
+        self._load_pair(audio_file, subtitle_file)
 
     def _initial_open_dir(self) -> str:
         saved_dir = self.settings.value("last_open_dir", "", str)
@@ -215,7 +220,7 @@ class ReciteWindow(QMainWindow):
         suffix = selected_path.suffix.lower()
         stem_path = selected_path.with_suffix("")
 
-        if suffix == ".lrc":
+        if suffix in SUBTITLE_EXTENSIONS:
             for ext in AUDIO_EXTENSIONS:
                 candidate_audio = stem_path.with_suffix(ext)
                 if candidate_audio.exists():
@@ -223,25 +228,26 @@ class ReciteWindow(QMainWindow):
             return None
 
         if suffix in AUDIO_EXTENSIONS:
-            candidate_lrc = stem_path.with_suffix(".lrc")
-            if candidate_lrc.exists():
-                return selected_path, candidate_lrc
+            for subtitle_ext in SUBTITLE_EXTENSIONS:
+                candidate_subtitle = stem_path.with_suffix(subtitle_ext)
+                if candidate_subtitle.exists():
+                    return selected_path, candidate_subtitle
             return None
 
         return None
 
-    def _load_pair(self, audio_file: Path, lrc_file: Path) -> None:
-        lyrics = self._parse_lrc(lrc_file)
+    def _load_pair(self, audio_file: Path, subtitle_file: Path) -> None:
+        lyrics = self._parse_subtitle(subtitle_file)
         if not lyrics:
             QMessageBox.warning(
                 self,
                 "No Timed Lines",
-                "The selected LRC file has no lines starting with valid timestamps.",
+                "The selected subtitle file has no valid timed lines.",
             )
             return
 
         self.audio_path = audio_file
-        self.lrc_path = lrc_file
+        self.subtitle_path = subtitle_file
         self.lyrics = lyrics
         self.current_index = 0
         self._end_continuous_mode(reset_index=False)
@@ -250,10 +256,16 @@ class ReciteWindow(QMainWindow):
         self.player.pause()
 
         self.file_label.setText(
-            f"Audio: {audio_file.name}    LRC: {lrc_file.name}")
+            f"Audio: {audio_file.name}    Subtitle: {subtitle_file.name}")
         self.refresh_lyrics_display()
         self._select_index(0)
         self.replay_current_line()
+
+    def _parse_subtitle(self, subtitle_file: Path) -> list[LyricLine]:
+        suffix = subtitle_file.suffix.lower()
+        if suffix == ".vtt":
+            return self._parse_vtt(subtitle_file)
+        return self._parse_lrc(subtitle_file)
 
     def _parse_lrc(self, lrc_file: Path) -> list[LyricLine]:
         parsed_lines: list[LyricLine] = []
@@ -270,6 +282,77 @@ class ReciteWindow(QMainWindow):
 
         parsed_lines.sort(key=lambda x: x.start_ms)
         return parsed_lines
+
+    def _parse_vtt(self, vtt_file: Path) -> list[LyricLine]:
+        lines = vtt_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+        parsed_lines: list[LyricLine] = []
+        i = 0
+
+        while i < len(lines):
+            line = lines[i].strip()
+            if not line:
+                i += 1
+                continue
+
+            upper = line.upper()
+            if upper == "WEBVTT":
+                i += 1
+                continue
+            if upper.startswith("NOTE"):
+                i += 1
+                while i < len(lines) and lines[i].strip():
+                    i += 1
+                continue
+            if upper.startswith("STYLE") or upper.startswith("REGION"):
+                i += 1
+                while i < len(lines) and lines[i].strip():
+                    i += 1
+                continue
+
+            timing_line = line
+            timing_match = VTT_CUE_TIMING_PATTERN.match(timing_line)
+            if timing_match is None and i + 1 < len(lines):
+                candidate_timing = lines[i + 1].strip()
+                timing_match = VTT_CUE_TIMING_PATTERN.match(candidate_timing)
+                if timing_match is not None:
+                    i += 1
+                    timing_line = candidate_timing
+
+            if timing_match is None:
+                i += 1
+                continue
+
+            start_ms = self._vtt_timestamp_to_ms(timing_match.group(1))
+            i += 1
+            text_lines: list[str] = []
+            while i < len(lines) and lines[i].strip():
+                text_lines.append(lines[i].strip())
+                i += 1
+
+            text = " ".join(text_lines).strip()
+            if text:
+                parsed_lines.append(LyricLine(start_ms=start_ms, text=text))
+
+        parsed_lines.sort(key=lambda x: x.start_ms)
+        return parsed_lines
+
+    @staticmethod
+    def _vtt_timestamp_to_ms(timestamp: str) -> int:
+        normalized = timestamp.replace(",", ".")
+        parts = normalized.split(":")
+        if len(parts) == 2:
+            hours = 0
+            minutes = int(parts[0])
+            sec_part = parts[1]
+        else:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            sec_part = parts[2]
+
+        seconds_str, millis_str = sec_part.split(".", 1)
+        seconds = int(seconds_str)
+        millis = int((millis_str + "000")[:3])
+        return ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis
 
     @staticmethod
     def _timestamp_to_ms(minutes: str, seconds: str, fraction: str | None) -> int:
@@ -355,9 +438,8 @@ class ReciteWindow(QMainWindow):
         self._end_continuous_mode(reset_index=False)
         self._select_index(self.current_index)
         start_ms = self.lyrics[self.current_index].start_ms
-        self.player.setPosition(start_ms)
-        self.player.play()
-        self.stop_timer.start()
+        if self._seek_and_play(start_ms):
+            self.stop_timer.start()
 
     def play_next_line(self) -> None:
         if not self.lyrics:
@@ -457,9 +539,25 @@ class ReciteWindow(QMainWindow):
 
         self._select_index(self.current_index)
         start_ms = self.lyrics[self.current_index].start_ms
+        if self._seek_and_play(start_ms):
+            self.stop_timer.start()
+
+    def _seek_and_play(self, requested_start_ms: int) -> bool:
+        duration = self.player.duration()
+        if duration > 0:
+            # MP3 decoders can emit timestamp warnings when seeking in the tail.
+            safe_last_start = max(0, duration - TAIL_SEEK_SAFETY_MS)
+            if requested_start_ms >= duration:
+                self.player.setPosition(safe_last_start)
+                self.player.pause()
+                return False
+            start_ms = min(requested_start_ms, safe_last_start)
+        else:
+            start_ms = max(0, requested_start_ms)
+
         self.player.setPosition(start_ms)
         self.player.play()
-        self.stop_timer.start()
+        return True
 
     def _start_gap_timer(self) -> None:
         if not self.continuous_mode or self.continuous_paused:
