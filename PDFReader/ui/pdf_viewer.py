@@ -118,8 +118,8 @@ class PDFPageWidget(QWidget):
         """
         Find the word index at or nearest to the given display position.
 
-        Uses text-editor logic:
-        1. Find the line closest to the vertical position
+        Uses text-editor logic with multi-column awareness:
+        1. Find the nearest line using both vertical and horizontal distance
         2. Find the word on that line closest to the horizontal position
         3. If point is past the end of a line, select the last word
         4. If point is before the start of a line, select the first word
@@ -143,32 +143,37 @@ class PDFPageWidget(QWidget):
         if not lines:
             return -1
 
-        # Sort lines by vertical position of their first word
-        sorted_lines = sorted(
-            lines.items(), key=lambda item: self._words[item[1][0]][1])
-
-        # Find the line closest to py
+        # Find the nearest line by 2D distance to line bounding box.
+        # This avoids picking the wrong column when multiple lines share
+        # a similar Y range.
         best_line_indices = None
-        best_y_dist = float('inf')
+        best_score = None
 
-        for _key, indices in sorted_lines:
-            # Compute line vertical bounds from all words in line
+        for _key, indices in lines.items():
+            # Compute line bounds from all words in line.
+            line_x0 = min(self._words[i][0] for i in indices)
+            line_x1 = max(self._words[i][2] for i in indices)
             line_y0 = min(self._words[i][1] for i in indices)
             line_y1 = max(self._words[i][3] for i in indices)
 
-            # Point is within the line's vertical range
-            if line_y0 <= py <= line_y1:
-                best_line_indices = indices
-                break
-
-            # Calculate vertical distance
-            if py < line_y0:
-                dist = line_y0 - py
+            if px < line_x0:
+                dx = line_x0 - px
+            elif px > line_x1:
+                dx = px - line_x1
             else:
-                dist = py - line_y1
+                dx = 0.0
 
-            if dist < best_y_dist:
-                best_y_dist = dist
+            if py < line_y0:
+                dy = line_y0 - py
+            elif py > line_y1:
+                dy = py - line_y1
+            else:
+                dy = 0.0
+
+            # Prioritize nearest vertical line first, then horizontal proximity.
+            score = (dy, dx)
+            if best_score is None or score < best_score:
+                best_score = score
                 best_line_indices = indices
 
         if best_line_indices is None:

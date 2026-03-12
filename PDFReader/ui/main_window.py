@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout,
     QSplitter, QFileDialog, QMessageBox, QApplication, QMenu
 )
-from PySide6.QtCore import Qt, QPoint, QTimer, QEvent
+from PySide6.QtCore import Qt, QPoint, QTimer, QEvent, QRect
 from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QColor, QAction
 
 from PDFReader.ui.toolbar import ToolbarWidget
@@ -823,6 +823,21 @@ class MainWindow(QMainWindow):
         y_top = int(rect[1])
         return self._viewer.map_page_to_global(QPoint(x_center, y_top))
 
+    def _selection_global_rect(self) -> QRect:
+        """Get current selection rectangle in global screen coordinates."""
+        rect = self._current_selection_rect
+        if not rect:
+            return QRect()
+
+        x0, y0, x1, y1 = rect
+        p0 = self._viewer.map_page_to_global(QPoint(int(x0), int(y0)))
+        p1 = self._viewer.map_page_to_global(QPoint(int(x1), int(y1)))
+        left = min(p0.x(), p1.x())
+        top = min(p0.y(), p1.y())
+        right = max(p0.x(), p1.x())
+        bottom = max(p0.y(), p1.y())
+        return QRect(left, top, max(1, right - left), max(1, bottom - top))
+
     def _hide_quick_translate_popup(self, *_args):
         if (
             self._quick_translate_correction_thread
@@ -864,13 +879,14 @@ class MainWindow(QMainWindow):
         anchor = self._quick_translate_anchor_global
         if anchor.isNull() and self._current_selection_rect:
             anchor = self._selection_anchor_global(self._current_selection_rect)
+        avoid_rect = self._selection_global_rect()
 
-        self._quick_translate_popup.show_correcting(anchor)
+        self._quick_translate_popup.show_correcting(anchor, avoid_rect)
 
         correction_thread = TextCorrectionThread(selected_text)
         correction_thread.correction_done.connect(
-            lambda corrected, src=selected_text, a=anchor: self._start_quick_translation(
-                src, corrected, a
+            lambda corrected, src=selected_text, a=anchor, ar=avoid_rect: self._start_quick_translation(
+                src, corrected, a, ar
             )
         )
         correction_thread.correction_error.connect(
@@ -897,13 +913,19 @@ class MainWindow(QMainWindow):
         anchor = self._quick_translate_anchor_global
         if anchor.isNull() and self._current_selection_rect:
             anchor = self._selection_anchor_global(self._current_selection_rect)
+        avoid_rect = self._selection_global_rect()
 
-        self._start_quick_translation(selected_text, selected_text, anchor)
+        self._start_quick_translation(selected_text, selected_text, anchor, avoid_rect)
 
     def _on_quick_translation_done(
-        self, source_text: str, corrected_text: str, translated_text: str, anchor: QPoint
+        self,
+        source_text: str,
+        corrected_text: str,
+        translated_text: str,
+        anchor: QPoint,
+        avoid_rect: QRect,
     ):
-        self._quick_translate_popup.set_result(anchor, translated_text)
+        self._quick_translate_popup.set_result(anchor, translated_text, avoid_rect)
         display_source = corrected_text.strip() or source_text
         self._direct_translations.insert(0, (display_source, translated_text))
         self._direct_translations = self._direct_translations[:200]
@@ -912,15 +934,15 @@ class MainWindow(QMainWindow):
         )
         self._side_panel.add_direct_translation(display_source, translated_text)
 
-    def _on_quick_translation_error(self, error: str, anchor: QPoint):
-        self._quick_translate_popup.set_error(anchor, error)
+    def _on_quick_translation_error(self, error: str, anchor: QPoint, avoid_rect: QRect):
+        self._quick_translate_popup.set_error(anchor, error, avoid_rect)
 
-    def _on_quick_translation_chunk(self, chunk: str, anchor: QPoint):
+    def _on_quick_translation_chunk(self, chunk: str, anchor: QPoint, avoid_rect: QRect):
         """Render direct-translation chunks incrementally in popup."""
         if not chunk:
             return
         if not self._quick_translate_popup.isVisible():
-            self._quick_translate_popup.start_streaming(anchor)
+            self._quick_translate_popup.start_streaming(anchor, avoid_rect)
         self._quick_translate_popup.append_stream_chunk(chunk)
 
     def _on_direct_translation_delete_requested(self, index: int):
@@ -978,13 +1000,17 @@ class MainWindow(QMainWindow):
         return "".join(parts).strip()
 
     def _start_quick_translation(
-        self, source_text: str, corrected_text: str, anchor: QPoint
+        self,
+        source_text: str,
+        corrected_text: str,
+        anchor: QPoint,
+        avoid_rect: QRect,
     ):
         if not self._app.is_document_loaded:
             return
 
         text_to_translate = (corrected_text or "").strip() or source_text
-        self._quick_translate_popup.show_loading(anchor)
+        self._quick_translate_popup.show_loading(anchor, avoid_rect)
         context_text = self._build_quick_translation_context(text_to_translate)
 
         thread = TranslationThread(
@@ -993,15 +1019,15 @@ class MainWindow(QMainWindow):
             context_text=context_text,
         )
         thread.translation_chunk.connect(
-            lambda chunk, a=anchor: self._on_quick_translation_chunk(chunk, a)
+            lambda chunk, a=anchor, ar=avoid_rect: self._on_quick_translation_chunk(chunk, a, ar)
         )
         thread.translation_done.connect(
-            lambda result, src=source_text, corr=text_to_translate, a=anchor: self._on_quick_translation_done(
-                src, corr, result, a
+            lambda result, src=source_text, corr=text_to_translate, a=anchor, ar=avoid_rect: self._on_quick_translation_done(
+                src, corr, result, a, ar
             )
         )
         thread.translation_error.connect(
-            lambda error, a=anchor: self._on_quick_translation_error(error, a)
+            lambda error, a=anchor, ar=avoid_rect: self._on_quick_translation_error(error, a, ar)
         )
         self._quick_translate_thread = thread
         thread.start()
