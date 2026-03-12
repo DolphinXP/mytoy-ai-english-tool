@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSlider,
+    QSpinBox,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -46,6 +47,10 @@ class ReciteWindow(QMainWindow):
         self.lrc_path: Path | None = None
         self.lyrics: list[LyricLine] = []
         self.current_index: int = -1
+        self.continuous_mode: bool = False
+        self.continuous_paused: bool = False
+        self.paused_during_gap: bool = False
+        self.current_repeat: int = 0
 
         self.audio_output = QAudioOutput(self)
         self.player = QMediaPlayer(self)
@@ -54,6 +59,10 @@ class ReciteWindow(QMainWindow):
         self.stop_timer = QTimer(self)
         self.stop_timer.setInterval(20)
         self.stop_timer.timeout.connect(self._check_line_end)
+
+        self.gap_timer = QTimer(self)
+        self.gap_timer.setSingleShot(True)
+        self.gap_timer.timeout.connect(self._play_current_line_for_continuous)
 
         self._build_ui()
         self._bind_shortcuts()
@@ -72,9 +81,13 @@ class ReciteWindow(QMainWindow):
         self.show_text_checkbox = QCheckBox("Show Original Text")
         self.show_text_checkbox.setChecked(False)
         self.show_text_checkbox.toggled.connect(self.refresh_lyrics_display)
+        self.show_first_word_checkbox = QCheckBox("Show First Word")
+        self.show_first_word_checkbox.setChecked(False)
+        self.show_first_word_checkbox.toggled.connect(self.refresh_lyrics_display)
 
         top_row.addWidget(open_button)
         top_row.addWidget(self.show_text_checkbox)
+        top_row.addWidget(self.show_first_word_checkbox)
         top_row.addStretch(1)
         layout.addLayout(top_row)
         layout.addWidget(self.file_label)
@@ -119,6 +132,30 @@ class ReciteWindow(QMainWindow):
         controls.addWidget(self.speed_label)
         controls.addWidget(self.speed_slider)
         layout.addLayout(controls)
+
+        continuous_controls = QHBoxLayout()
+        self.continuous_button = QPushButton("Play Continuous")
+        self.continuous_button.clicked.connect(self.toggle_continuous_play)
+        self.stop_continuous_button = QPushButton("Stop Continuous")
+        self.stop_continuous_button.clicked.connect(self.stop_continuous_play)
+        self.repeat_label = QLabel("Repeat each subtitle:")
+        self.repeat_spin = QSpinBox()
+        self.repeat_spin.setRange(1, 20)
+        self.repeat_spin.setValue(3)
+        self.gap_label = QLabel("Gap (ms):")
+        self.gap_spin = QSpinBox()
+        self.gap_spin.setRange(0, 10000)
+        self.gap_spin.setSingleStep(100)
+        self.gap_spin.setValue(500)
+
+        continuous_controls.addWidget(self.continuous_button)
+        continuous_controls.addWidget(self.stop_continuous_button)
+        continuous_controls.addStretch(1)
+        continuous_controls.addWidget(self.repeat_label)
+        continuous_controls.addWidget(self.repeat_spin)
+        continuous_controls.addWidget(self.gap_label)
+        continuous_controls.addWidget(self.gap_spin)
+        layout.addLayout(continuous_controls)
 
     def _on_speed_changed(self, value: int) -> None:
         rate = value / 100.0
@@ -206,6 +243,7 @@ class ReciteWindow(QMainWindow):
         self.lrc_path = lrc_file
         self.lyrics = lyrics
         self.current_index = 0
+        self._end_continuous_mode(reset_index=False)
 
         self.player.setSource(QUrl.fromLocalFile(str(audio_file)))
         self.player.pause()
@@ -248,9 +286,16 @@ class ReciteWindow(QMainWindow):
     def refresh_lyrics_display(self) -> None:
         self.lyrics_list.clear()
         show_text = self.show_text_checkbox.isChecked()
+        show_first_word = self.show_first_word_checkbox.isChecked()
         for idx, line in enumerate(self.lyrics):
             ts = self._format_ms(line.start_ms)
-            line_text = f"{ts}  {line.text}" if show_text else ts
+            if show_text:
+                line_text = f"{ts}  {line.text}"
+            elif show_first_word:
+                first_word = line.text.split(maxsplit=1)[0] if line.text else ""
+                line_text = f"{ts}  {first_word}" if first_word else ts
+            else:
+                line_text = ts
             item = QListWidgetItem(line_text)
             item.setData(Qt.ItemDataRole.UserRole, idx)
             self.lyrics_list.addItem(item)
@@ -300,6 +345,7 @@ class ReciteWindow(QMainWindow):
         if self.current_index < 0:
             self.current_index = 0
 
+        self._end_continuous_mode(reset_index=False)
         self._select_index(self.current_index)
         start_ms = self.lyrics[self.current_index].start_ms
         self.player.setPosition(start_ms)
@@ -309,6 +355,7 @@ class ReciteWindow(QMainWindow):
     def play_next_line(self) -> None:
         if not self.lyrics:
             return
+        self._end_continuous_mode(reset_index=False)
         next_index = min(self.current_index + 1, len(self.lyrics) - 1)
         self.current_index = next_index
         self.replay_current_line()
@@ -316,9 +363,105 @@ class ReciteWindow(QMainWindow):
     def play_previous_line(self) -> None:
         if not self.lyrics:
             return
+        self._end_continuous_mode(reset_index=False)
         prev_index = max(self.current_index - 1, 0)
         self.current_index = prev_index
         self.replay_current_line()
+
+    def toggle_continuous_play(self) -> None:
+        if not self.lyrics:
+            return
+
+        if not self.continuous_mode:
+            self.start_continuous_play()
+            return
+
+        if self.continuous_paused:
+            self.resume_continuous_play()
+        else:
+            self.pause_continuous_play()
+
+    def start_continuous_play(self) -> None:
+        if not self.lyrics:
+            return
+
+        if self.current_index < 0 or self.current_index >= len(self.lyrics):
+            self.current_index = 0
+
+        self.continuous_mode = True
+        self.continuous_paused = False
+        self.paused_during_gap = False
+        self.current_repeat = 0
+        self.continuous_button.setText("Pause Continuous")
+        self._play_current_line_for_continuous()
+
+    def pause_continuous_play(self) -> None:
+        if not self.continuous_mode:
+            return
+
+        self.continuous_paused = True
+        if self.gap_timer.isActive():
+            self.gap_timer.stop()
+            self.paused_during_gap = True
+        else:
+            self.player.pause()
+            self.stop_timer.stop()
+        self.continuous_button.setText("Resume Continuous")
+
+    def resume_continuous_play(self) -> None:
+        if not self.continuous_mode:
+            return
+
+        self.continuous_paused = False
+        self.continuous_button.setText("Pause Continuous")
+        if self.paused_during_gap:
+            self.paused_during_gap = False
+            self._start_gap_timer()
+            return
+
+        self.player.play()
+        self.stop_timer.start()
+
+    def stop_continuous_play(self) -> None:
+        if not self.lyrics:
+            return
+        self._end_continuous_mode(reset_index=True)
+
+    def _end_continuous_mode(self, reset_index: bool) -> None:
+        self.continuous_mode = False
+        self.continuous_paused = False
+        self.paused_during_gap = False
+        self.current_repeat = 0
+        self.gap_timer.stop()
+        self.stop_timer.stop()
+        self.player.pause()
+        self.continuous_button.setText("Play Continuous")
+
+        if reset_index and self.lyrics:
+            self.current_index = 0
+            self._select_index(0)
+
+    def _play_current_line_for_continuous(self) -> None:
+        if not self.continuous_mode or self.continuous_paused:
+            return
+        if not (0 <= self.current_index < len(self.lyrics)):
+            self._end_continuous_mode(reset_index=False)
+            return
+
+        self._select_index(self.current_index)
+        start_ms = self.lyrics[self.current_index].start_ms
+        self.player.setPosition(start_ms)
+        self.player.play()
+        self.stop_timer.start()
+
+    def _start_gap_timer(self) -> None:
+        if not self.continuous_mode or self.continuous_paused:
+            return
+        gap_ms = max(0, self.gap_spin.value())
+        if gap_ms == 0:
+            self._play_current_line_for_continuous()
+            return
+        self.gap_timer.start(gap_ms)
 
     def _check_line_end(self) -> None:
         if not self.lyrics or self.current_index < 0:
@@ -328,6 +471,22 @@ class ReciteWindow(QMainWindow):
         if self.player.position() >= self._line_end_ms(self.current_index):
             self.player.pause()
             self.stop_timer.stop()
+            if not self.continuous_mode or self.continuous_paused:
+                return
+
+            repeat_target = max(1, self.repeat_spin.value())
+            if self.current_repeat + 1 < repeat_target:
+                self.current_repeat += 1
+                self._play_current_line_for_continuous()
+                return
+
+            self.current_repeat = 0
+            if self.current_index + 1 < len(self.lyrics):
+                self.current_index += 1
+                self._start_gap_timer()
+                return
+
+            self._end_continuous_mode(reset_index=False)
 
 
 def main() -> int:
