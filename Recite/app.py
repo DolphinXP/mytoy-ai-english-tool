@@ -51,9 +51,11 @@ class ReciteWindow(QMainWindow):
 
         self.audio_path: Path | None = None
         self.subtitle_path: Path | None = None
-        self.lyrics: list[LyricLine] = []
+        self.all_lyrics: list[LyricLine] = []  # unfiltered, full parse result
+        self.lyrics: list[LyricLine] = []       # filtered to audio duration
         self.lyric_starts: list[int] = []
         self.current_index: int = -1
+        self.audio_duration_ms: int = 0
         self.continuous_mode: bool = False
         self.continuous_paused: bool = False
         self.paused_during_gap: bool = False
@@ -267,8 +269,10 @@ class ReciteWindow(QMainWindow):
 
         self.audio_path = audio_file
         self.subtitle_path = subtitle_file
-        self.lyrics = lyrics
-        self.lyric_starts = [line.start_ms for line in lyrics]
+        self.all_lyrics = lyrics
+        self.audio_duration_ms = 0  # will be set by _on_player_duration_changed
+        self.lyrics = list(lyrics)  # start with all; filter once duration is known
+        self.lyric_starts = [line.start_ms for line in self.lyrics]
         self.current_index = 0
         self._end_continuous_mode(reset_index=False)
 
@@ -429,8 +433,10 @@ class ReciteWindow(QMainWindow):
         return f"{mm:02d}:{ss:02d}"
 
     def _on_player_duration_changed(self, duration_ms: int) -> None:
-        self.progress_slider.setRange(0, max(0, duration_ms))
+        self.audio_duration_ms = max(0, duration_ms)
+        self.progress_slider.setRange(0, self.audio_duration_ms)
         self.total_label.setText(self._format_mmss(duration_ms))
+        self._filter_lyrics_by_duration()
 
     def _on_player_position_changed(self, position_ms: int) -> None:
         if not self.user_seeking:
@@ -454,6 +460,60 @@ class ReciteWindow(QMainWindow):
         self._sync_index_to_position(new_pos)
         if self.continuous_mode:
             self.current_repeat = 0
+
+    def _filter_lyrics_by_duration(self) -> None:
+        """Remove subtitle lines that start at or beyond the audio duration,
+        and trim trailing lines whose timespan is less than 1 second.
+
+        Whisper sometimes hallucinates cues past the real end of the audio,
+        or produces very short phantom entries near the tail.  Once the true
+        duration is known we strip those entries so they never appear in the
+        UI or interfere with playback."""
+        if self.audio_duration_ms <= 0 or not self.all_lyrics:
+            return
+
+        MIN_SPAN_MS = 1000  # minimum subtitle duration to keep
+
+        # Step 1: remove lines that start at or beyond audio duration
+        filtered = [line for line in self.all_lyrics
+                    if line.start_ms < self.audio_duration_ms]
+
+        # Step 2: trim trailing lines whose timespan < 1 second
+        while len(filtered) > 0:
+            last = filtered[-1]
+            # The span of the last cue runs from its start to the audio end
+            # (or to the next cue's start for non-last entries)
+            if len(filtered) >= 2:
+                span = filtered[-1].start_ms - filtered[-2].start_ms
+                # Only trim from the tail — if the second-to-last has a
+                # normal span, it means the last one is an isolated blip
+                end_span = self.audio_duration_ms - last.start_ms
+            else:
+                end_span = self.audio_duration_ms - last.start_ms
+                span = end_span
+
+            if end_span < MIN_SPAN_MS:
+                filtered.pop()
+            else:
+                break
+
+        if len(filtered) == len(self.lyrics):
+            return  # nothing changed
+
+        removed = len(self.all_lyrics) - len(filtered)
+        self.lyrics = filtered
+        self.lyric_starts = [line.start_ms for line in self.lyrics]
+
+        # Clamp current index into the valid range
+        if self.current_index >= len(self.lyrics):
+            self.current_index = max(0, len(self.lyrics) - 1)
+
+        self.refresh_lyrics_display()
+        if self.lyrics:
+            self._select_index(self.current_index)
+
+        print(f"[Recite] Removed {removed} subtitle(s) beyond audio duration "
+              f"({self._format_mmss(self.audio_duration_ms)}).")
 
     def _sync_index_to_position(self, position_ms: int) -> None:
         if not self.lyric_starts:
@@ -485,12 +545,18 @@ class ReciteWindow(QMainWindow):
 
     def _line_end_ms(self, index: int) -> int:
         if index + 1 < len(self.lyrics):
-            return self.lyrics[index + 1].start_ms
+            end = self.lyrics[index + 1].start_ms
+        else:
+            duration = self.player.duration()
+            if duration > self.lyrics[index].start_ms:
+                end = duration
+            else:
+                end = self.lyrics[index].start_ms + 4000
 
-        duration = self.player.duration()
-        if duration > self.lyrics[index].start_ms:
-            return duration
-        return self.lyrics[index].start_ms + 4000
+        # Never exceed audio duration
+        if self.audio_duration_ms > 0:
+            end = min(end, self.audio_duration_ms)
+        return end
 
     def replay_current_line(self) -> None:
         if not self.lyrics:
