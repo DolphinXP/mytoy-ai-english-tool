@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sys
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,15 +52,19 @@ class ReciteWindow(QMainWindow):
         self.audio_path: Path | None = None
         self.subtitle_path: Path | None = None
         self.lyrics: list[LyricLine] = []
+        self.lyric_starts: list[int] = []
         self.current_index: int = -1
         self.continuous_mode: bool = False
         self.continuous_paused: bool = False
         self.paused_during_gap: bool = False
         self.current_repeat: int = 0
+        self.user_seeking: bool = False
 
         self.audio_output = QAudioOutput(self)
         self.player = QMediaPlayer(self)
         self.player.setAudioOutput(self.audio_output)
+        self.player.positionChanged.connect(self._on_player_position_changed)
+        self.player.durationChanged.connect(self._on_player_duration_changed)
 
         self.stop_timer = QTimer(self)
         self.stop_timer.setInterval(20)
@@ -115,6 +120,20 @@ class ReciteWindow(QMainWindow):
         self.lyrics_list.itemDoubleClicked.connect(
             self._on_item_double_clicked)
         layout.addWidget(self.lyrics_list)
+
+        progress_row = QHBoxLayout()
+        self.elapsed_label = QLabel("00:00")
+        self.progress_slider = QSlider(Qt.Orientation.Horizontal)
+        self.progress_slider.setRange(0, 0)
+        self.progress_slider.sliderPressed.connect(self._on_seek_slider_pressed)
+        self.progress_slider.sliderReleased.connect(
+            self._on_seek_slider_released)
+        self.progress_slider.sliderMoved.connect(self._on_seek_slider_moved)
+        self.total_label = QLabel("00:00")
+        progress_row.addWidget(self.elapsed_label)
+        progress_row.addWidget(self.progress_slider, 1)
+        progress_row.addWidget(self.total_label)
+        layout.addLayout(progress_row)
 
         controls = QHBoxLayout()
         self.prev_button = QPushButton("Previous (↑)")
@@ -249,6 +268,7 @@ class ReciteWindow(QMainWindow):
         self.audio_path = audio_file
         self.subtitle_path = subtitle_file
         self.lyrics = lyrics
+        self.lyric_starts = [line.start_ms for line in lyrics]
         self.current_index = 0
         self._end_continuous_mode(reset_index=False)
 
@@ -400,6 +420,49 @@ class ReciteWindow(QMainWindow):
         ss = total_seconds % 60
         cc = (ms % 1000) // 10
         return f"[{mm:02d}:{ss:02d}.{cc:02d}]"
+
+    @staticmethod
+    def _format_mmss(ms: int) -> str:
+        total_seconds = max(0, ms) // 1000
+        mm = total_seconds // 60
+        ss = total_seconds % 60
+        return f"{mm:02d}:{ss:02d}"
+
+    def _on_player_duration_changed(self, duration_ms: int) -> None:
+        self.progress_slider.setRange(0, max(0, duration_ms))
+        self.total_label.setText(self._format_mmss(duration_ms))
+
+    def _on_player_position_changed(self, position_ms: int) -> None:
+        if not self.user_seeking:
+            self.progress_slider.setValue(max(0, position_ms))
+        self.elapsed_label.setText(self._format_mmss(position_ms))
+        if not self.stop_timer.isActive():
+            self._sync_index_to_position(position_ms)
+
+    def _on_seek_slider_pressed(self) -> None:
+        self.user_seeking = True
+
+    def _on_seek_slider_moved(self, position_ms: int) -> None:
+        self.elapsed_label.setText(self._format_mmss(position_ms))
+        self._sync_index_to_position(position_ms)
+
+    def _on_seek_slider_released(self) -> None:
+        self.user_seeking = False
+        new_pos = self.progress_slider.value()
+        self.player.setPosition(new_pos)
+        self.elapsed_label.setText(self._format_mmss(new_pos))
+        self._sync_index_to_position(new_pos)
+        if self.continuous_mode:
+            self.current_repeat = 0
+
+    def _sync_index_to_position(self, position_ms: int) -> None:
+        if not self.lyric_starts:
+            return
+        idx = bisect_right(self.lyric_starts, max(0, position_ms)) - 1
+        if idx < 0:
+            idx = 0
+        if idx != self.current_index and 0 <= idx < len(self.lyrics):
+            self._select_index(idx)
 
     def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
         index = item.data(Qt.ItemDataRole.UserRole)
