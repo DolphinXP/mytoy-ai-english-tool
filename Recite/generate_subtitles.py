@@ -15,6 +15,7 @@ import glob
 import os
 import subprocess
 import sys
+import time
 
 # Audio file extensions supported by Whisper
 AUDIO_EXTENSIONS = {
@@ -39,7 +40,19 @@ def find_audio_files(folder: str) -> list[str]:
     return audio_files
 
 
-def run_whisper(audio_path: str, language: str, model: str) -> bool:
+def format_time(seconds: float) -> str:
+    """Format seconds into a human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(int(seconds), 60)
+    if minutes < 60:
+        return f"{minutes}m {secs:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m {secs:02d}s"
+
+
+def run_whisper(audio_path: str, language: str, model: str,
+                current: int, total: int) -> bool:
     """Run Whisper on a single audio file. Returns True on success."""
     filename = os.path.basename(audio_path)
     output_dir = os.path.dirname(audio_path)
@@ -53,7 +66,7 @@ def run_whisper(audio_path: str, language: str, model: str) -> bool:
     ]
 
     print(f"\n{'='*60}")
-    print(f"Processing: {filename}")
+    print(f"[{current}/{total}] Processing: {filename}")
     print(f"Command:    {' '.join(cmd)}")
     print(f"{'='*60}")
 
@@ -121,22 +134,39 @@ def main():
         print(f"  - {os.path.basename(f)}")
 
     # Process each audio file
+    total = len(audio_files)
     success_count = 0
     fail_count = 0
+    skip_count = 0
+    batch_start = time.time()
+    processed_times: list[float] = []
 
-    for audio_path in audio_files:
+    for i, audio_path in enumerate(audio_files, start=1):
         # Skip files that already have a .vtt subtitle
         base_name = os.path.splitext(os.path.basename(audio_path))[0]
         vtt_path = os.path.join(folder, base_name + ".vtt")
         if os.path.exists(vtt_path):
-            print(f"\n⏭ Skipping (VTT already exists): {os.path.basename(audio_path)}")
+            print(f"\n⏭ [{i}/{total}] Skipping (VTT already exists): {os.path.basename(audio_path)}")
+            skip_count += 1
             success_count += 1
             continue
 
-        if run_whisper(audio_path, args.language, args.model):
+        file_start = time.time()
+        if run_whisper(audio_path, args.language, args.model, i, total):
             success_count += 1
         else:
             fail_count += 1
+
+        elapsed = time.time() - file_start
+        processed_times.append(elapsed)
+        avg_time = sum(processed_times) / len(processed_times)
+        remaining = total - i
+        eta = avg_time * remaining
+
+        total_elapsed = time.time() - batch_start
+        print(f"  ⏱ File: {format_time(elapsed)} | "
+              f"Elapsed: {format_time(total_elapsed)} | "
+              f"ETA: {format_time(eta)} ({remaining} file(s) left)")
 
     # Clean up non-VTT subtitle files
     print(f"\n{'='*60}")
@@ -144,9 +174,13 @@ def main():
     cleanup_non_vtt_files(folder, audio_files)
 
     # Summary
+    total_elapsed = time.time() - batch_start
     print(f"\n{'='*60}")
-    print(f"Done! Processed {success_count + fail_count} file(s).")
+    print(f"Done! Total time: {format_time(total_elapsed)}")
+    print(f"  Total:   {total} file(s)")
     print(f"  ✓ Success: {success_count}")
+    if skip_count:
+        print(f"  ⏭ Skipped: {skip_count}")
     if fail_count:
         print(f"  ✗ Failed:  {fail_count}")
     print(f"VTT files saved in: {folder}")
