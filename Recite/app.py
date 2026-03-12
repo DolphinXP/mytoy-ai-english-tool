@@ -113,14 +113,6 @@ class ReciteWindow(QMainWindow):
             "font-size: 24px; font-weight: 600; padding: 8px;")
         layout.addWidget(self.current_line_label)
 
-        self.lyrics_list = QListWidget()
-        self.lyrics_list.setWordWrap(True)
-        self.lyrics_list.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.lyrics_list.itemDoubleClicked.connect(
-            self._on_item_double_clicked)
-        layout.addWidget(self.lyrics_list)
-
         progress_row = QHBoxLayout()
         self.elapsed_label = QLabel("00:00")
         self.progress_slider = QSlider(Qt.Orientation.Horizontal)
@@ -134,6 +126,14 @@ class ReciteWindow(QMainWindow):
         progress_row.addWidget(self.progress_slider, 1)
         progress_row.addWidget(self.total_label)
         layout.addLayout(progress_row)
+
+        self.lyrics_list = QListWidget()
+        self.lyrics_list.setWordWrap(True)
+        self.lyrics_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.lyrics_list.itemDoubleClicked.connect(
+            self._on_item_double_clicked)
+        layout.addWidget(self.lyrics_list)
 
         controls = QHBoxLayout()
         self.prev_button = QPushButton("Previous (↑)")
