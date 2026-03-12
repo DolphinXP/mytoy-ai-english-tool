@@ -81,13 +81,14 @@ class ReciteWindow(QMainWindow):
         self.show_text_checkbox = QCheckBox("Show Original Text")
         self.show_text_checkbox.setChecked(False)
         self.show_text_checkbox.toggled.connect(self.refresh_lyrics_display)
-        self.show_first_word_checkbox = QCheckBox("Show First Word")
-        self.show_first_word_checkbox.setChecked(False)
-        self.show_first_word_checkbox.toggled.connect(self.refresh_lyrics_display)
+        self.show_preview_words_checkbox = QCheckBox("Show Preview Words")
+        self.show_preview_words_checkbox.setChecked(False)
+        self.show_preview_words_checkbox.toggled.connect(
+            self.refresh_lyrics_display)
 
         top_row.addWidget(open_button)
         top_row.addWidget(self.show_text_checkbox)
-        top_row.addWidget(self.show_first_word_checkbox)
+        top_row.addWidget(self.show_preview_words_checkbox)
         top_row.addStretch(1)
         layout.addLayout(top_row)
         layout.addWidget(self.file_label)
@@ -286,14 +287,20 @@ class ReciteWindow(QMainWindow):
     def refresh_lyrics_display(self) -> None:
         self.lyrics_list.clear()
         show_text = self.show_text_checkbox.isChecked()
-        show_first_word = self.show_first_word_checkbox.isChecked()
+        show_preview_words = self.show_preview_words_checkbox.isChecked()
         for idx, line in enumerate(self.lyrics):
             ts = self._format_ms(line.start_ms)
             if show_text:
                 line_text = f"{ts}  {line.text}"
-            elif show_first_word:
-                first_word = line.text.split(maxsplit=1)[0] if line.text else ""
-                line_text = f"{ts}  {first_word}" if first_word else ts
+            elif show_preview_words:
+                words = line.text.split()
+                if len(words) >= 3:
+                    preview_text = " ".join(words[:3])
+                elif words:
+                    preview_text = words[0]
+                else:
+                    preview_text = ""
+                line_text = f"{ts}  {preview_text}" if preview_text else ts
             else:
                 line_text = ts
             item = QListWidgetItem(line_text)
