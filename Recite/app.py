@@ -633,6 +633,7 @@ class ReciteWindow(QMainWindow):
         else:
             self.current_line_label.setPlainText("")
         self._adjust_subtitle_height()
+        self._hide_translate_panel()
 
     def _adjust_subtitle_height(self) -> None:
         """Resize the subtitle area to fit its content."""
