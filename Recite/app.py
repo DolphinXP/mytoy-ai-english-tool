@@ -1,19 +1,6 @@
 from __future__ import annotations
-
-import re
-import sys
-from bisect import bisect_right
-from dataclasses import dataclass
-from pathlib import Path
-
-# Add parent directory so shared services are importable
-_parent_dir = str(Path(__file__).parent.parent)
-if _parent_dir not in sys.path:
-    sys.path.insert(0, _parent_dir)
-
-from PySide6.QtCore import QSettings, QStandardPaths, QTimer, Qt, QUrl, QPoint
-from PySide6.QtGui import QAction, QCursor, QKeySequence, QShortcut, QTextCursor
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from services.api.translation import TranslationThread
+from utils.config import default_configs
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -35,10 +22,21 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtGui import QAction, QCursor, QKeySequence, QShortcut, QTextCursor
+from PySide6.QtCore import QSettings, QStandardPaths, QTimer, Qt, QUrl, QPoint
 
-from utils.config import default_configs
+import re
+import sys
+from bisect import bisect_right
+from dataclasses import dataclass
+from pathlib import Path
 
-from services.api.translation import TranslationThread
+# Add parent directory so shared services are importable
+_parent_dir = str(Path(__file__).parent.parent)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+
 
 AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".flac", ".ogg")
 SUBTITLE_EXTENSIONS = (".lrc", ".vtt")
@@ -130,7 +128,8 @@ class ReciteWindow(QMainWindow):
         idx = self.api_combo.findData(saved_profile)
         if idx >= 0:
             self.api_combo.setCurrentIndex(idx)
-        self.api_combo.currentIndexChanged.connect(self._on_api_profile_changed)
+        self.api_combo.currentIndexChanged.connect(
+            self._on_api_profile_changed)
         top_row.addWidget(self.api_combo)
 
         layout.addLayout(top_row)
@@ -204,7 +203,8 @@ class ReciteWindow(QMainWindow):
         self.elapsed_label = QLabel("00:00")
         self.progress_slider = QSlider(Qt.Orientation.Horizontal)
         self.progress_slider.setRange(0, 0)
-        self.progress_slider.sliderPressed.connect(self._on_seek_slider_pressed)
+        self.progress_slider.sliderPressed.connect(
+            self._on_seek_slider_pressed)
         self.progress_slider.sliderReleased.connect(
             self._on_seek_slider_released)
         self.progress_slider.sliderMoved.connect(self._on_seek_slider_moved)
@@ -360,7 +360,8 @@ class ReciteWindow(QMainWindow):
         self.subtitle_path = subtitle_file
         self.all_lyrics = lyrics
         self.audio_duration_ms = 0  # will be set by _on_player_duration_changed
-        self.lyrics = list(lyrics)  # start with all; filter once duration is known
+        # start with all; filter once duration is known
+        self.lyrics = list(lyrics)
         self.lyric_starts = [line.start_ms for line in self.lyrics]
         self.current_index = 0
         self._end_continuous_mode(reset_index=False)
@@ -397,7 +398,8 @@ class ReciteWindow(QMainWindow):
         return parsed_lines
 
     def _parse_vtt(self, vtt_file: Path) -> list[LyricLine]:
-        lines = vtt_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+        lines = vtt_file.read_text(
+            encoding="utf-8", errors="ignore").splitlines()
         parsed_lines: list[LyricLine] = []
         i = 0
 
@@ -856,15 +858,15 @@ class ReciteWindow(QMainWindow):
             }
         """)
 
-        copy_action = QAction("Copy", self._subtitle_menu)
-        copy_action.triggered.connect(self._on_subtitle_copy)
-        self._subtitle_menu.addAction(copy_action)
-
-        self._subtitle_menu.addSeparator()
-
         translate_action = QAction("Translate to Chinese", self._subtitle_menu)
         translate_action.triggered.connect(self._on_translate_selected)
         self._subtitle_menu.addAction(translate_action)
+
+        self._subtitle_menu.addSeparator()
+
+        copy_action = QAction("Copy", self._subtitle_menu)
+        copy_action.triggered.connect(self._on_subtitle_copy)
+        self._subtitle_menu.addAction(copy_action)
 
     def _on_subtitle_selection_changed(self) -> None:
         """Restart the debounce timer whenever the selection changes."""
