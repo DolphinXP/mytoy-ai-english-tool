@@ -6,26 +6,39 @@ from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, QStandardPaths, QTimer, Qt, QUrl
-from PySide6.QtGui import QKeySequence, QShortcut
+# Add parent directory so shared services are importable
+_parent_dir = str(Path(__file__).parent.parent)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+
+from PySide6.QtCore import QSettings, QStandardPaths, QTimer, Qt, QUrl, QPoint
+from PySide6.QtGui import QAction, QCursor, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSlider,
     QSpinBox,
     QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
+
+from utils.config import default_configs
+
+from services.api.translation import TranslationThread
 
 AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".flac", ".ogg")
 SUBTITLE_EXTENSIONS = (".lrc", ".vtt")
@@ -102,18 +115,90 @@ class ReciteWindow(QMainWindow):
         top_row.addWidget(self.show_text_checkbox)
         top_row.addWidget(self.show_preview_words_checkbox)
         top_row.addStretch(1)
+
+        self.translate_all_button = QPushButton("Translate All")
+        self.translate_all_button.clicked.connect(self._on_translate_all)
+        top_row.addWidget(self.translate_all_button)
+
+        top_row.addWidget(QLabel("Translate API:"))
+        self.api_combo = QComboBox()
+        for key in default_configs:
+            self.api_combo.addItem(key, key)
+        # Restore saved profile or default to ollama_translate
+        saved_profile = self.settings.value(
+            "translate_api_profile", "ollama_translate", str)
+        idx = self.api_combo.findData(saved_profile)
+        if idx >= 0:
+            self.api_combo.setCurrentIndex(idx)
+        self.api_combo.currentIndexChanged.connect(self._on_api_profile_changed)
+        top_row.addWidget(self.api_combo)
+
         layout.addLayout(top_row)
         layout.addWidget(self.file_label)
 
-        self.current_line_label = QLabel("")
+        self.current_line_label = QTextEdit()
+        self.current_line_label.setReadOnly(True)
         self.current_line_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.current_line_label.setWordWrap(True)
-        self.current_line_label.setMinimumHeight(100)
+        self.current_line_label.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.current_line_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.current_line_label.setFixedHeight(50)
         self.current_line_label.setStyleSheet(
-            "font-size: 24px; font-weight: 600; padding: 8px;")
+            "font-size: 24px; font-weight: 600; padding: 4px 8px;"
+            "border: none; background: transparent;")
+        # Right-click context menu
+        self.current_line_label.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.current_line_label.customContextMenuRequested.connect(
+            self._on_subtitle_right_click)
+        # Auto-show context menu when text is selected (drag / double-click)
+        self._selection_popup_timer = QTimer(self)
+        self._selection_popup_timer.setSingleShot(True)
+        self._selection_popup_timer.setInterval(200)
+        self._selection_popup_timer.timeout.connect(
+            self._on_subtitle_selection_finished)
+        self.current_line_label.selectionChanged.connect(
+            self._on_subtitle_selection_changed)
         layout.addWidget(self.current_line_label)
+
+        # --- Inline translation panel ---
+        self._translate_frame = QFrame()
+        self._translate_frame.setStyleSheet("""
+            QFrame {
+                background-color: #252526;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+            }
+        """)
+        self._translate_frame.setFixedHeight(46)
+        tf_layout = QHBoxLayout(self._translate_frame)
+        tf_layout.setContentsMargins(8, 2, 2, 2)
+        tf_layout.setSpacing(2)
+        self._translate_text = QTextEdit()
+        self._translate_text.setReadOnly(True)
+        self._translate_text.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._translate_text.setStyleSheet(
+            "background: transparent; border: none; color: #d4d4d4;"
+            "font-size: 14px; font-family: Tahoma, Consolas, monospace;"
+            "padding: 0px;")
+        self._translate_text.setFixedHeight(38)
+        tf_layout.addWidget(self._translate_text, 1)
+        self._translate_close_btn = QPushButton("✕")
+        self._translate_close_btn.setFixedSize(20, 20)
+        self._translate_close_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none;"
+            "  color: #a0a0a0; font-size: 12px; }"
+            "QPushButton:hover { color: #ffffff; }")
+        self._translate_close_btn.clicked.connect(self._hide_translate_panel)
+        tf_layout.addWidget(self._translate_close_btn,
+                            0, Qt.AlignmentFlag.AlignTop)
+        self._translate_frame.hide()
+        layout.addWidget(self._translate_frame)
+
+        self._translate_thread: TranslationThread | None = None
+        self._build_subtitle_context_menu()
 
         progress_row = QHBoxLayout()
         self.elapsed_label = QLabel("00:00")
@@ -188,6 +273,10 @@ class ReciteWindow(QMainWindow):
         rate = value / 100.0
         self.player.setPlaybackRate(rate)
         self.speed_label.setText(f"Speed: {rate:.2f}x")
+
+    def _on_api_profile_changed(self, _index: int) -> None:
+        profile = self.api_combo.currentData() or "ollama_translate"
+        self.settings.setValue("translate_api_profile", profile)
 
     def _bind_shortcuts(self) -> None:
         QShortcut(QKeySequence(Qt.Key.Key_Up), self,
@@ -539,9 +628,23 @@ class ReciteWindow(QMainWindow):
         self.lyrics_list.setCurrentRow(index)
 
         if self.show_text_checkbox.isChecked():
-            self.current_line_label.setText(self.lyrics[index].text)
+            self.current_line_label.setPlainText(self.lyrics[index].text)
+            self.current_line_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         else:
-            self.current_line_label.setText("")
+            self.current_line_label.setPlainText("")
+        self._adjust_subtitle_height()
+
+    def _adjust_subtitle_height(self) -> None:
+        """Resize the subtitle area to fit its content."""
+        doc = self.current_line_label.document()
+        doc.setTextWidth(self.current_line_label.viewport().width())
+        h = int(doc.size().height()) + 16  # 16 px for padding/margins
+        h = max(40, min(h, 200))
+        self.current_line_label.setFixedHeight(h)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._adjust_subtitle_height()
 
     def _line_end_ms(self, index: int) -> int:
         if index + 1 < len(self.lyrics):
@@ -721,6 +824,133 @@ class ReciteWindow(QMainWindow):
                 return
 
             self._end_continuous_mode(reset_index=False)
+
+    # ─── Translation support ──────────────────────────────────────────────
+
+    def _build_subtitle_context_menu(self) -> None:
+        """Create a right-click context menu for the subtitle text area."""
+        self._subtitle_menu = QMenu(self)
+        self._subtitle_menu.setStyleSheet("""
+            QMenu {
+                background-color: #252526;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+                padding: 4px 0;
+                color: #d4d4d4;
+            }
+            QMenu::item {
+                background-color: transparent;
+                color: #d4d4d4;
+                padding: 8px 24px;
+                font-size: 13px;
+            }
+            QMenu::item:selected {
+                background-color: #0e639c;
+                color: #ffffff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #3c3c3c;
+                margin: 4px 8px;
+            }
+        """)
+
+        copy_action = QAction("Copy", self._subtitle_menu)
+        copy_action.triggered.connect(self._on_subtitle_copy)
+        self._subtitle_menu.addAction(copy_action)
+
+        self._subtitle_menu.addSeparator()
+
+        translate_action = QAction("Translate to Chinese", self._subtitle_menu)
+        translate_action.triggered.connect(self._on_translate_selected)
+        self._subtitle_menu.addAction(translate_action)
+
+    def _on_subtitle_selection_changed(self) -> None:
+        """Restart the debounce timer whenever the selection changes."""
+        self._selection_popup_timer.start()
+
+    def _on_subtitle_selection_finished(self) -> None:
+        """Auto-show context menu after selection stabilises."""
+        cursor = self.current_line_label.textCursor()
+        selected = cursor.selectedText().strip()
+        if not selected:
+            return
+        self._subtitle_menu.popup(QCursor.pos())
+
+    def _on_subtitle_right_click(self, pos) -> None:
+        """Show context menu on right-click."""
+        cursor = self.current_line_label.textCursor()
+        selected = cursor.selectedText().strip()
+        if not selected:
+            return
+        global_pos = self.current_line_label.mapToGlobal(pos)
+        self._subtitle_menu.popup(global_pos)
+
+    def _on_subtitle_copy(self) -> None:
+        cursor = self.current_line_label.textCursor()
+        selected = cursor.selectedText().strip()
+        if selected:
+            QApplication.clipboard().setText(selected)
+
+    def _on_translate_selected(self) -> None:
+        cursor = self.current_line_label.textCursor()
+        selected = cursor.selectedText().strip()
+        if not selected:
+            return
+        self._start_translate(selected)
+
+    def _on_translate_all(self) -> None:
+        """Translate the entire current subtitle line."""
+        if not self.lyrics or not (0 <= self.current_index < len(self.lyrics)):
+            return
+        text = self.lyrics[self.current_index].text.strip()
+        if not text:
+            return
+        self._start_translate(text)
+
+    def _start_translate(self, text: str) -> None:
+        """Kick off a streaming translation of *text*."""
+        # Stop any previous translation thread.
+        if self._translate_thread and self._translate_thread.isRunning():
+            self._translate_thread.stop()
+            self._translate_thread.wait(500)
+
+        self._translate_text.setPlainText("Translating...")
+        self._translate_frame.show()
+
+        api_profile = self.api_combo.currentData() or "ollama_translate"
+        thread = TranslationThread(
+            text_to_translate=text,
+            api_config=api_profile,
+        )
+        thread.translation_chunk.connect(self._on_translate_chunk)
+        thread.translation_done.connect(self._on_translate_done)
+        thread.translation_error.connect(self._on_translate_error)
+        self._translate_thread = thread
+        thread.start()
+
+    def _on_translate_chunk(self, chunk: str) -> None:
+        if not chunk:
+            return
+        # On first real chunk, clear the "Translating..." placeholder
+        if self._translate_text.toPlainText() == "Translating...":
+            self._translate_text.clear()
+        cursor = self._translate_text.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(chunk)
+        self._translate_text.setTextCursor(cursor)
+
+    def _on_translate_done(self, result: str) -> None:
+        self._translate_text.setPlainText(result.strip())
+
+    def _on_translate_error(self, error: str) -> None:
+        self._translate_text.setPlainText(f"Error: {error}")
+
+    def _hide_translate_panel(self) -> None:
+        if self._translate_thread and self._translate_thread.isRunning():
+            self._translate_thread.stop()
+            self._translate_thread.wait(500)
+        self._translate_frame.hide()
 
 
 def main() -> int:
