@@ -1,4 +1,13 @@
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Make shared top-level packages importable when running this file directly.
+_parent_dir = str(Path(__file__).resolve().parent.parent)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+
 from services.api.translation import TranslationThread
 from utils.config import default_configs
 from PySide6.QtWidgets import (
@@ -27,15 +36,8 @@ from PySide6.QtGui import QAction, QCursor, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtCore import QSettings, QStandardPaths, QTimer, Qt, QUrl, QPoint
 
 import re
-import sys
 from bisect import bisect_right
 from dataclasses import dataclass
-from pathlib import Path
-
-# Add parent directory so shared services are importable
-_parent_dir = str(Path(__file__).parent.parent)
-if _parent_dir not in sys.path:
-    sys.path.insert(0, _parent_dir)
 
 
 AUDIO_EXTENSIONS = (".mp3", ".wav", ".m4a", ".flac", ".ogg")
