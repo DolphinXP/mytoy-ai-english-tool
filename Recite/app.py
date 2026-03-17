@@ -235,6 +235,14 @@ class ReciteWindow(QMainWindow):
             self._on_subtitle_selection_finished)
         self.current_line_label.selectionChanged.connect(
             self._on_subtitle_selection_changed)
+        self._subtitle_hint_label = QLabel(
+            "Hover here or hold R to reveal subtitle",
+            self.current_line_label.viewport(),
+        )
+        self._subtitle_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._subtitle_hint_label.setStyleSheet(
+            "color: #808080; font-size: 14px; padding: 0 10px; "
+            "background: transparent; border: none;")
         self.current_line_label.viewport().installEventFilter(self)
         layout.addWidget(self.current_line_label)
 
@@ -645,10 +653,15 @@ class ReciteWindow(QMainWindow):
         h = int(doc.size().height()) + 20
         h = max(50, min(h, 180))
         self.current_line_label.setFixedHeight(h)
+        self._position_subtitle_hint()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._adjust_subtitle_height()
+
+    def _position_subtitle_hint(self) -> None:
+        self._subtitle_hint_label.setGeometry(
+            self.current_line_label.viewport().rect())
 
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.Type.KeyPress:
@@ -688,6 +701,7 @@ class ReciteWindow(QMainWindow):
 
         self.current_line_label.setPlainText(display_text)
         self.current_line_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._subtitle_hint_label.setVisible(not bool(display_text))
 
     def _line_end_ms(self, index: int) -> int:
         if index + 1 < len(self.lyrics):
