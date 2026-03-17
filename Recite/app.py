@@ -32,7 +32,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-from PySide6.QtGui import QAction, QCursor, QKeySequence, QShortcut, QTextCursor
+from PySide6.QtGui import (
+    QAction,
+    QCursor,
+    QKeySequence,
+    QPalette,
+    QShortcut,
+    QTextCursor,
+)
 from PySide6.QtCore import QEvent, QSettings, QStandardPaths, QTimer, Qt, QUrl
 
 import re
@@ -220,10 +227,6 @@ class ReciteWindow(QMainWindow):
         self.current_line_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.current_line_label.setFixedHeight(50)
-        self.current_line_label.setStyleSheet(
-            "font-size: 24px; font-weight: 600; padding: 8px 10px;"
-            "border: 1px solid #d0d0d0; border-radius: 6px;"
-            "background: #fafafa;")
         self.current_line_label.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu)
         self.current_line_label.customContextMenuRequested.connect(
@@ -240,9 +243,7 @@ class ReciteWindow(QMainWindow):
             self.current_line_label.viewport(),
         )
         self._subtitle_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._subtitle_hint_label.setStyleSheet(
-            "color: #808080; font-size: 14px; padding: 0 10px; "
-            "background: transparent; border: none;")
+        self._apply_current_subtitle_style()
         self.current_line_label.viewport().installEventFilter(self)
         layout.addWidget(self.current_line_label)
 
@@ -287,6 +288,33 @@ class ReciteWindow(QMainWindow):
         rate = value / 100.0
         self.player.setPlaybackRate(rate)
         self.speed_label.setText(f"Speed: {rate:.2f}x")
+
+    def _apply_current_subtitle_style(self) -> None:
+        """Keep subtitle text readable by following the active Qt palette."""
+        palette = self.current_line_label.palette()
+        base_color = palette.color(QPalette.ColorRole.Base)
+        text_color = palette.color(QPalette.ColorRole.Text)
+        border_color = palette.color(QPalette.ColorRole.Mid)
+        hint_color = palette.color(QPalette.ColorRole.PlaceholderText)
+        if not hint_color.isValid():
+            hint_color = text_color
+
+        self.current_line_label.setStyleSheet(
+            "font-size: 24px; font-weight: 600; padding: 8px 10px;"
+            f"border: 1px solid {border_color.name()}; border-radius: 6px;"
+            f"background: {base_color.name()}; color: {text_color.name()};")
+        self._subtitle_hint_label.setStyleSheet(
+            f"color: {hint_color.name()}; font-size: 14px; padding: 0 10px; "
+            "background: transparent; border: none;")
+
+    def changeEvent(self, event) -> None:
+        if event.type() in (
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+            QEvent.Type.StyleChange,
+        ):
+            self._apply_current_subtitle_style()
+        super().changeEvent(event)
 
     def _on_api_profile_changed(self, _index: int) -> None:
         profile = self.api_combo.currentData() or "ollama_translate"
