@@ -74,7 +74,8 @@ class ReciteWindow(QMainWindow):
         self.paused_during_gap: bool = False
         self.current_repeat: int = 0
         self.user_seeking: bool = False
-        self.hovered_list_index: int = -1
+        self.subtitle_area_hovered: bool = False
+        self.reveal_shortcut_held: bool = False
 
         self.audio_output = QAudioOutput(self)
         self.player = QMediaPlayer(self)
@@ -92,6 +93,7 @@ class ReciteWindow(QMainWindow):
 
         self._build_ui()
         self._bind_shortcuts()
+        QApplication.instance().installEventFilter(self)
 
     def _build_ui(self) -> None:
         root = QWidget(self)
@@ -206,9 +208,6 @@ class ReciteWindow(QMainWindow):
         self.lyrics_list.setWordWrap(True)
         self.lyrics_list.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.lyrics_list.setMouseTracking(True)
-        self.lyrics_list.viewport().setMouseTracking(True)
-        self.lyrics_list.viewport().installEventFilter(self)
         self.lyrics_list.itemDoubleClicked.connect(
             self._on_item_double_clicked)
         layout.addWidget(self.lyrics_list, 1)
@@ -236,6 +235,7 @@ class ReciteWindow(QMainWindow):
             self._on_subtitle_selection_finished)
         self.current_line_label.selectionChanged.connect(
             self._on_subtitle_selection_changed)
+        self.current_line_label.viewport().installEventFilter(self)
         layout.addWidget(self.current_line_label)
 
         self._translate_frame = QFrame()
@@ -511,8 +511,6 @@ class ReciteWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, idx)
             self.lyrics_list.addItem(item)
 
-        if self.hovered_list_index >= len(self.lyrics):
-            self.hovered_list_index = -1
         if 0 <= self.current_index < len(self.lyrics):
             self._select_index(self.current_index)
 
@@ -653,46 +651,28 @@ class ReciteWindow(QMainWindow):
         self._adjust_subtitle_height()
 
     def eventFilter(self, watched, event) -> bool:
-        if watched is self.lyrics_list.viewport():
-            if event.type() == QEvent.Type.MouseMove:
-                self._update_hovered_list_index(event.pos())
+        if event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_R and not event.isAutoRepeat():
+                if not self.reveal_shortcut_held:
+                    self.reveal_shortcut_held = True
+                    self._refresh_current_line_label()
+                    self._adjust_subtitle_height()
+        elif event.type() == QEvent.Type.KeyRelease:
+            if event.key() == Qt.Key.Key_R and not event.isAutoRepeat():
+                if self.reveal_shortcut_held:
+                    self.reveal_shortcut_held = False
+                    self._refresh_current_line_label()
+                    self._adjust_subtitle_height()
+        if watched is self.current_line_label.viewport():
+            if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
+                self.subtitle_area_hovered = True
+                self._refresh_current_line_label()
+                self._adjust_subtitle_height()
             elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
-                self._clear_hovered_list_index()
+                self.subtitle_area_hovered = False
+                self._refresh_current_line_label()
+                self._adjust_subtitle_height()
         return super().eventFilter(watched, event)
-
-    def _update_hovered_list_index(self, pos) -> None:
-        if self.show_text_checkbox.isChecked() or self.show_preview_words_checkbox.isChecked():
-            self._clear_hovered_list_index()
-            return
-
-        item = self.lyrics_list.itemAt(pos)
-        if item is None:
-            self._clear_hovered_list_index()
-            return
-
-        item_rect = self.lyrics_list.visualItemRect(item)
-        text_margin = 8
-        text_width = self.lyrics_list.fontMetrics().horizontalAdvance(item.text())
-        text_left = item_rect.left() + text_margin
-        text_right = text_left + text_width
-        within_text = text_left <= pos.x() <= text_right
-
-        new_index = item.data(Qt.ItemDataRole.UserRole) if within_text else -1
-        if not isinstance(new_index, int):
-            new_index = -1
-        if new_index == self.hovered_list_index:
-            return
-
-        self.hovered_list_index = new_index
-        self._refresh_current_line_label()
-        self._adjust_subtitle_height()
-
-    def _clear_hovered_list_index(self) -> None:
-        if self.hovered_list_index == -1:
-            return
-        self.hovered_list_index = -1
-        self._refresh_current_line_label()
-        self._adjust_subtitle_height()
 
     def _refresh_current_line_label(self) -> None:
         display_text = ""
@@ -701,9 +681,10 @@ class ReciteWindow(QMainWindow):
                 display_text = self.lyrics[self.current_index].text
         elif (
             not self.show_preview_words_checkbox.isChecked()
-            and 0 <= self.hovered_list_index < len(self.lyrics)
+            and (self.subtitle_area_hovered or self.reveal_shortcut_held)
+            and 0 <= self.current_index < len(self.lyrics)
         ):
-            display_text = self.lyrics[self.hovered_list_index].text
+            display_text = self.lyrics[self.current_index].text
 
         self.current_line_label.setPlainText(display_text)
         self.current_line_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
