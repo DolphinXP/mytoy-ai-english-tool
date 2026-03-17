@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QAction, QCursor, QKeySequence, QShortcut, QTextCursor
-from PySide6.QtCore import QSettings, QStandardPaths, QTimer, Qt, QUrl, QPoint
+from PySide6.QtCore import QEvent, QSettings, QStandardPaths, QTimer, Qt, QUrl
 
 import re
 from bisect import bisect_right
@@ -74,6 +74,7 @@ class ReciteWindow(QMainWindow):
         self.paused_during_gap: bool = False
         self.current_repeat: int = 0
         self.user_seeking: bool = False
+        self.hovered_list_index: int = -1
 
         self.audio_output = QAudioOutput(self)
         self.player = QMediaPlayer(self)
@@ -137,70 +138,6 @@ class ReciteWindow(QMainWindow):
         layout.addLayout(top_row)
         layout.addWidget(self.file_label)
 
-        self.current_line_label = QTextEdit()
-        self.current_line_label.setReadOnly(True)
-        self.current_line_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.current_line_label.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.current_line_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.current_line_label.setFixedHeight(50)
-        self.current_line_label.setStyleSheet(
-            "font-size: 24px; font-weight: 600; padding: 4px 8px;"
-            "border: none; background: transparent;")
-        # Right-click context menu
-        self.current_line_label.setContextMenuPolicy(
-            Qt.ContextMenuPolicy.CustomContextMenu)
-        self.current_line_label.customContextMenuRequested.connect(
-            self._on_subtitle_right_click)
-        # Auto-show context menu when text is selected (drag / double-click)
-        self._selection_popup_timer = QTimer(self)
-        self._selection_popup_timer.setSingleShot(True)
-        self._selection_popup_timer.setInterval(200)
-        self._selection_popup_timer.timeout.connect(
-            self._on_subtitle_selection_finished)
-        self.current_line_label.selectionChanged.connect(
-            self._on_subtitle_selection_changed)
-        layout.addWidget(self.current_line_label)
-
-        # --- Inline translation panel ---
-        self._translate_frame = QFrame()
-        self._translate_frame.setStyleSheet("""
-            QFrame {
-                background-color: #252526;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-            }
-        """)
-        self._translate_frame.setFixedHeight(46)
-        tf_layout = QHBoxLayout(self._translate_frame)
-        tf_layout.setContentsMargins(8, 2, 2, 2)
-        tf_layout.setSpacing(2)
-        self._translate_text = QTextEdit()
-        self._translate_text.setReadOnly(True)
-        self._translate_text.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._translate_text.setStyleSheet(
-            "background: transparent; border: none; color: #d4d4d4;"
-            "font-size: 14px; font-family: Tahoma, Consolas, monospace;"
-            "padding: 0px;")
-        self._translate_text.setFixedHeight(38)
-        tf_layout.addWidget(self._translate_text, 1)
-        self._translate_close_btn = QPushButton("✕")
-        self._translate_close_btn.setFixedSize(20, 20)
-        self._translate_close_btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none;"
-            "  color: #a0a0a0; font-size: 12px; }"
-            "QPushButton:hover { color: #ffffff; }")
-        self._translate_close_btn.clicked.connect(self._hide_translate_panel)
-        tf_layout.addWidget(self._translate_close_btn,
-                            0, Qt.AlignmentFlag.AlignTop)
-        self._translate_frame.hide()
-        layout.addWidget(self._translate_frame)
-
-        self._translate_thread: TranslationThread | None = None
-        self._build_subtitle_context_menu()
-
         progress_row = QHBoxLayout()
         self.elapsed_label = QLabel("00:00")
         self.progress_slider = QSlider(Qt.Orientation.Horizontal)
@@ -215,14 +152,6 @@ class ReciteWindow(QMainWindow):
         progress_row.addWidget(self.progress_slider, 1)
         progress_row.addWidget(self.total_label)
         layout.addLayout(progress_row)
-
-        self.lyrics_list = QListWidget()
-        self.lyrics_list.setWordWrap(True)
-        self.lyrics_list.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.lyrics_list.itemDoubleClicked.connect(
-            self._on_item_double_clicked)
-        layout.addWidget(self.lyrics_list)
 
         controls = QHBoxLayout()
         self.prev_button = QPushButton("Previous (↑)")
@@ -270,6 +199,79 @@ class ReciteWindow(QMainWindow):
         continuous_controls.addWidget(self.gap_label)
         continuous_controls.addWidget(self.gap_spin)
         layout.addLayout(continuous_controls)
+
+        self.lyrics_list = QListWidget()
+        self.lyrics_list.setWordWrap(True)
+        self.lyrics_list.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.lyrics_list.setMouseTracking(True)
+        self.lyrics_list.viewport().setMouseTracking(True)
+        self.lyrics_list.viewport().installEventFilter(self)
+        self.lyrics_list.itemDoubleClicked.connect(
+            self._on_item_double_clicked)
+        layout.addWidget(self.lyrics_list, 1)
+
+        self.current_line_label = QTextEdit()
+        self.current_line_label.setReadOnly(True)
+        self.current_line_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.current_line_label.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.current_line_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.current_line_label.setFixedHeight(50)
+        self.current_line_label.setStyleSheet(
+            "font-size: 24px; font-weight: 600; padding: 8px 10px;"
+            "border: 1px solid #d0d0d0; border-radius: 6px;"
+            "background: #fafafa;")
+        self.current_line_label.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        self.current_line_label.customContextMenuRequested.connect(
+            self._on_subtitle_right_click)
+        self._selection_popup_timer = QTimer(self)
+        self._selection_popup_timer.setSingleShot(True)
+        self._selection_popup_timer.setInterval(200)
+        self._selection_popup_timer.timeout.connect(
+            self._on_subtitle_selection_finished)
+        self.current_line_label.selectionChanged.connect(
+            self._on_subtitle_selection_changed)
+        layout.addWidget(self.current_line_label)
+
+        self._translate_frame = QFrame()
+        self._translate_frame.setStyleSheet("""
+            QFrame {
+                background-color: #252526;
+                border: 1px solid #3c3c3c;
+                border-radius: 4px;
+            }
+        """)
+        self._translate_frame.setFixedHeight(46)
+        tf_layout = QHBoxLayout(self._translate_frame)
+        tf_layout.setContentsMargins(8, 2, 2, 2)
+        tf_layout.setSpacing(2)
+        self._translate_text = QTextEdit()
+        self._translate_text.setReadOnly(True)
+        self._translate_text.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._translate_text.setStyleSheet(
+            "background: transparent; border: none; color: #d4d4d4;"
+            "font-size: 14px; font-family: Tahoma, Consolas, monospace;"
+            "padding: 0px;")
+        self._translate_text.setFixedHeight(38)
+        tf_layout.addWidget(self._translate_text, 1)
+        self._translate_close_btn = QPushButton("✕")
+        self._translate_close_btn.setFixedSize(20, 20)
+        self._translate_close_btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none;"
+            "  color: #a0a0a0; font-size: 12px; }"
+            "QPushButton:hover { color: #ffffff; }")
+        self._translate_close_btn.clicked.connect(self._hide_translate_panel)
+        tf_layout.addWidget(self._translate_close_btn,
+                            0, Qt.AlignmentFlag.AlignTop)
+        self._translate_frame.hide()
+        layout.addWidget(self._translate_frame)
+
+        self._translate_thread: TranslationThread | None = None
+        self._build_subtitle_context_menu()
 
     def _on_speed_changed(self, value: int) -> None:
         rate = value / 100.0
@@ -507,6 +509,8 @@ class ReciteWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, idx)
             self.lyrics_list.addItem(item)
 
+        if self.hovered_list_index >= len(self.lyrics):
+            self.hovered_list_index = -1
         if 0 <= self.current_index < len(self.lyrics):
             self._select_index(self.current_index)
 
@@ -630,26 +634,77 @@ class ReciteWindow(QMainWindow):
 
         self.current_index = index
         self.lyrics_list.setCurrentRow(index)
-
-        if self.show_text_checkbox.isChecked():
-            self.current_line_label.setPlainText(self.lyrics[index].text)
-            self.current_line_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        else:
-            self.current_line_label.setPlainText("")
+        self._refresh_current_line_label()
         self._adjust_subtitle_height()
         self._hide_translate_panel()
 
     def _adjust_subtitle_height(self) -> None:
-        """Resize the subtitle area to fit its content."""
+        """Resize the subtitle area to fit content near the bottom of the layout."""
         doc = self.current_line_label.document()
         doc.setTextWidth(self.current_line_label.viewport().width())
-        h = int(doc.size().height()) + 16  # 16 px for padding/margins
-        h = max(40, min(h, 200))
+        h = int(doc.size().height()) + 20
+        h = max(50, min(h, 180))
         self.current_line_label.setFixedHeight(h)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._adjust_subtitle_height()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.lyrics_list.viewport():
+            if event.type() == QEvent.Type.MouseMove:
+                self._update_hovered_list_index(event.pos())
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                self._clear_hovered_list_index()
+        return super().eventFilter(watched, event)
+
+    def _update_hovered_list_index(self, pos) -> None:
+        if self.show_text_checkbox.isChecked() or self.show_preview_words_checkbox.isChecked():
+            self._clear_hovered_list_index()
+            return
+
+        item = self.lyrics_list.itemAt(pos)
+        if item is None:
+            self._clear_hovered_list_index()
+            return
+
+        item_rect = self.lyrics_list.visualItemRect(item)
+        text_margin = 8
+        text_width = self.lyrics_list.fontMetrics().horizontalAdvance(item.text())
+        text_left = item_rect.left() + text_margin
+        text_right = text_left + text_width
+        within_text = text_left <= pos.x() <= text_right
+
+        new_index = item.data(Qt.ItemDataRole.UserRole) if within_text else -1
+        if not isinstance(new_index, int):
+            new_index = -1
+        if new_index == self.hovered_list_index:
+            return
+
+        self.hovered_list_index = new_index
+        self._refresh_current_line_label()
+        self._adjust_subtitle_height()
+
+    def _clear_hovered_list_index(self) -> None:
+        if self.hovered_list_index == -1:
+            return
+        self.hovered_list_index = -1
+        self._refresh_current_line_label()
+        self._adjust_subtitle_height()
+
+    def _refresh_current_line_label(self) -> None:
+        display_text = ""
+        if self.show_text_checkbox.isChecked():
+            if 0 <= self.current_index < len(self.lyrics):
+                display_text = self.lyrics[self.current_index].text
+        elif (
+            not self.show_preview_words_checkbox.isChecked()
+            and 0 <= self.hovered_list_index < len(self.lyrics)
+        ):
+            display_text = self.lyrics[self.hovered_list_index].text
+
+        self.current_line_label.setPlainText(display_text)
+        self.current_line_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def _line_end_ms(self, index: int) -> int:
         if index + 1 < len(self.lyrics):
