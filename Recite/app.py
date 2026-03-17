@@ -173,7 +173,7 @@ class ReciteWindow(QMainWindow):
 
         controls = QHBoxLayout()
         self.prev_button = QPushButton("Previous (↑)")
-        self.replay_button = QPushButton("Replay (R)")
+        self.replay_button = QPushButton("Replay (Space)")
         self.next_button = QPushButton("Next (↓)")
 
         self.prev_button.clicked.connect(self.play_previous_line)
@@ -239,7 +239,7 @@ class ReciteWindow(QMainWindow):
         self.current_line_label.selectionChanged.connect(
             self._on_subtitle_selection_changed)
         self._subtitle_hint_label = QLabel(
-            "Hover here or hold Space to reveal subtitle",
+            "Hover here or hold R to reveal subtitle",
             self.current_line_label.viewport(),
         )
         self._subtitle_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -325,7 +325,7 @@ class ReciteWindow(QMainWindow):
                   activated=self.play_previous_line)
         QShortcut(QKeySequence(Qt.Key.Key_Down),
                   self, activated=self.play_next_line)
-        QShortcut(QKeySequence(Qt.Key.Key_R), self,
+        QShortcut(QKeySequence(Qt.Key.Key_Space), self,
                   activated=self.replay_current_line)
 
     def open_file(self) -> None:
@@ -693,13 +693,13 @@ class ReciteWindow(QMainWindow):
 
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+            if event.key() == Qt.Key.Key_R and not event.isAutoRepeat():
                 if not self.reveal_shortcut_held:
                     self.reveal_shortcut_held = True
                     self._refresh_current_line_label()
                     self._adjust_subtitle_height()
         elif event.type() == QEvent.Type.KeyRelease:
-            if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+            if event.key() == Qt.Key.Key_R and not event.isAutoRepeat():
                 if self.reveal_shortcut_held:
                     self.reveal_shortcut_held = False
                     self._refresh_current_line_label()
