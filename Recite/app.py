@@ -83,6 +83,7 @@ class ReciteWindow(QMainWindow):
         self.user_seeking: bool = False
         self.subtitle_area_hovered: bool = False
         self.reveal_shortcut_held: bool = False
+        self._subtitle_menu_open: bool = False
 
         self.audio_output = QAudioOutput(self)
         self.player = QMediaPlayer(self)
@@ -231,13 +232,6 @@ class ReciteWindow(QMainWindow):
             Qt.ContextMenuPolicy.CustomContextMenu)
         self.current_line_label.customContextMenuRequested.connect(
             self._on_subtitle_right_click)
-        self._selection_popup_timer = QTimer(self)
-        self._selection_popup_timer.setSingleShot(True)
-        self._selection_popup_timer.setInterval(200)
-        self._selection_popup_timer.timeout.connect(
-            self._on_subtitle_selection_finished)
-        self.current_line_label.selectionChanged.connect(
-            self._on_subtitle_selection_changed)
         self._subtitle_hint_label = QLabel(
             "Hover here or hold R to reveal subtitle",
             self.current_line_label.viewport(),
@@ -282,6 +276,7 @@ class ReciteWindow(QMainWindow):
         layout.addWidget(self._translate_frame)
 
         self._translate_thread: TranslationThread | None = None
+        self._subtitle_menu_selected_text = ""
         self._build_subtitle_context_menu()
 
     def _on_speed_changed(self, value: int) -> None:
@@ -296,13 +291,33 @@ class ReciteWindow(QMainWindow):
         text_color = palette.color(QPalette.ColorRole.Text)
         border_color = palette.color(QPalette.ColorRole.Mid)
         hint_color = palette.color(QPalette.ColorRole.PlaceholderText)
+        highlight_color = palette.color(QPalette.ColorGroup.Active,
+                                        QPalette.ColorRole.Highlight)
+        highlighted_text_color = palette.color(
+            QPalette.ColorGroup.Active,
+            QPalette.ColorRole.HighlightedText,
+        )
         if not hint_color.isValid():
             hint_color = text_color
+
+        palette.setColor(
+            QPalette.ColorGroup.Inactive,
+            QPalette.ColorRole.Highlight,
+            highlight_color,
+        )
+        palette.setColor(
+            QPalette.ColorGroup.Inactive,
+            QPalette.ColorRole.HighlightedText,
+            highlighted_text_color,
+        )
+        self.current_line_label.setPalette(palette)
 
         self.current_line_label.setStyleSheet(
             "font-size: 24px; font-weight: 600; padding: 8px 10px;"
             f"border: 1px solid {border_color.name()}; border-radius: 6px;"
-            f"background: {base_color.name()}; color: {text_color.name()};")
+            f"background: {base_color.name()}; color: {text_color.name()};"
+            f"selection-background-color: {highlight_color.name()};"
+            f"selection-color: {highlighted_text_color.name()};")
         self._subtitle_hint_label.setStyleSheet(
             f"color: {hint_color.name()}; font-size: 14px; padding: 0 10px; "
             "background: transparent; border: none;")
@@ -707,12 +722,14 @@ class ReciteWindow(QMainWindow):
         if watched is self.current_line_label.viewport():
             if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
                 self.subtitle_area_hovered = True
-                self._refresh_current_line_label()
-                self._adjust_subtitle_height()
+                if not self._subtitle_menu_open:
+                    self._refresh_current_line_label()
+                    self._adjust_subtitle_height()
             elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
                 self.subtitle_area_hovered = False
-                self._refresh_current_line_label()
-                self._adjust_subtitle_height()
+                if not self._subtitle_menu_open:
+                    self._refresh_current_line_label()
+                    self._adjust_subtitle_height()
         return super().eventFilter(watched, event)
 
     def _refresh_current_line_label(self) -> None:
@@ -940,46 +957,59 @@ class ReciteWindow(QMainWindow):
             }
         """)
 
-        translate_action = QAction("Translate to Chinese", self._subtitle_menu)
-        translate_action.triggered.connect(self._on_translate_selected)
-        self._subtitle_menu.addAction(translate_action)
+        self._translate_selected_action = QAction(
+            "Translate to Chinese", self._subtitle_menu)
+        self._translate_selected_action.triggered.connect(
+            self._on_translate_selected)
+        self._subtitle_menu.addAction(self._translate_selected_action)
 
         self._subtitle_menu.addSeparator()
 
-        copy_action = QAction("Copy", self._subtitle_menu)
-        copy_action.triggered.connect(self._on_subtitle_copy)
-        self._subtitle_menu.addAction(copy_action)
+        self._copy_subtitle_action = QAction("Copy", self._subtitle_menu)
+        self._copy_subtitle_action.triggered.connect(self._on_subtitle_copy)
+        self._subtitle_menu.addAction(self._copy_subtitle_action)
+        self._subtitle_menu.aboutToShow.connect(
+            self._on_subtitle_menu_about_to_show)
+        self._subtitle_menu.aboutToHide.connect(
+            self._on_subtitle_menu_about_to_hide)
 
-    def _on_subtitle_selection_changed(self) -> None:
-        """Restart the debounce timer whenever the selection changes."""
-        self._selection_popup_timer.start()
+    def _on_subtitle_menu_about_to_show(self) -> None:
+        self._subtitle_menu_open = True
 
-    def _on_subtitle_selection_finished(self) -> None:
-        """Auto-show context menu after selection stabilises."""
-        cursor = self.current_line_label.textCursor()
-        selected = cursor.selectedText().strip()
-        if not selected:
-            return
-        self._subtitle_menu.popup(QCursor.pos())
+    def _on_subtitle_menu_about_to_hide(self) -> None:
+        self._subtitle_menu_open = False
+        self.subtitle_area_hovered = self.current_line_label.viewport().underMouse()
+        self._refresh_current_line_label()
+        self._adjust_subtitle_height()
+
+    def _get_current_subtitle_selection(self) -> str:
+        return self.current_line_label.textCursor().selectedText().strip()
+
+    def _prepare_subtitle_menu(self) -> bool:
+        """Capture current selection before the popup steals focus."""
+        selected = self._get_current_subtitle_selection()
+        self._subtitle_menu_selected_text = selected
+        has_selected_text = bool(selected)
+        self._translate_selected_action.setEnabled(has_selected_text)
+        self._copy_subtitle_action.setEnabled(has_selected_text)
+        return has_selected_text
 
     def _on_subtitle_right_click(self, pos) -> None:
         """Show context menu on right-click."""
-        cursor = self.current_line_label.textCursor()
-        selected = cursor.selectedText().strip()
-        if not selected:
+        if not self._prepare_subtitle_menu():
             return
-        global_pos = self.current_line_label.mapToGlobal(pos)
-        self._subtitle_menu.popup(global_pos)
+        global_pos = self.current_line_label.viewport().mapToGlobal(pos)
+        self._subtitle_menu.exec(global_pos)
 
     def _on_subtitle_copy(self) -> None:
-        cursor = self.current_line_label.textCursor()
-        selected = cursor.selectedText().strip()
+        selected = self._subtitle_menu_selected_text or (
+            self._get_current_subtitle_selection())
         if selected:
             QApplication.clipboard().setText(selected)
 
     def _on_translate_selected(self) -> None:
-        cursor = self.current_line_label.textCursor()
-        selected = cursor.selectedText().strip()
+        selected = self._subtitle_menu_selected_text or (
+            self._get_current_subtitle_selection())
         if not selected:
             return
         self._start_translate(selected)
