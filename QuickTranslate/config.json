@@ -1,0 +1,34 @@
+{
+  "current_service": "deepseek",
+  "services": {
+    "deepseek": {
+      "endpoint": "https://api.xiaomimimo.com/v1",
+      "key": "YOUR_API_KEY_HERE",
+      "model": "mimo-v2-flash",
+      "timeout": 60.0,
+      "verify_ssl": true
+    },
+    "ollama": {
+      "endpoint": "http://10.110.31.157:11434/v1",
+      "key": "ollama",
+      "model": "qwen3.5:9b",
+      "timeout": 120.0,
+      "verify_ssl": false
+    }
+  },
+  "hotkey": "<ctrl>+<alt>+q",
+  "ui": {
+    "theme": "dark",
+    "opacity": 0.9,
+    "animation_duration": 300
+  },
+  "tts": {
+    "enabled": true,
+    "rate": 150,
+    "volume": 0.8
+  },
+  "history": {
+    "max_items": 20,
+    "auto_save": true
+  }
+}

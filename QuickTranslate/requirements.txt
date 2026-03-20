@@ -1,0 +1,16 @@
+# Quick Translation App - Dependencies
+
+# UI Framework
+PySide6>=6.5.0
+
+# Global Hotkey
+pynput>=1.7.6
+
+# HTTP Client
+httpx>=0.24.0
+
+# OpenAI API Client
+openai>=1.0.0
+
+# Text-to-Speech
+pyttsx3>=2.90

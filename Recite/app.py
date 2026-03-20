@@ -238,6 +238,7 @@ class ReciteWindow(QMainWindow):
         )
         self._subtitle_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._apply_current_subtitle_style()
+        self._position_subtitle_hint()
         self.current_line_label.viewport().installEventFilter(self)
         layout.addWidget(self.current_line_label)
 
@@ -330,6 +331,11 @@ class ReciteWindow(QMainWindow):
         ):
             self._apply_current_subtitle_style()
         super().changeEvent(event)
+
+    def showEvent(self, event) -> None:
+        """Ensure hint label is positioned after the window is shown."""
+        super().showEvent(event)
+        self._position_subtitle_hint()
 
     def _on_api_profile_changed(self, _index: int) -> None:
         profile = self.api_combo.currentData() or "ollama_translate"
