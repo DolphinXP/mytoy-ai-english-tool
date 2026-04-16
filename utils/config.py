@@ -1,12 +1,13 @@
 """
 Configuration management for API services.
 """
+import os
 
 # Default API configurations
 default_configs = {
     'deepseek': {
         'endpoint': "https://api.xiaomimimo.com/v1",
-        'key': "YOUR_API_KEY_HERE",
+        'key': os.environ.get("API_KEY", ""),
         'model': "mimo-v2-flash",
         'proxy': None,
         'timeout': 60.0,

@@ -18,7 +18,7 @@ import httpx
 from openai import OpenAI
 
 # DeepSeek API configuration
-API_KEY = "YOUR_API_KEY_HERE"
+API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 BASE_URL = "https://api.deepseek.com"
 MODEL = "deepseek-chat"
 

@@ -3,7 +3,7 @@
   "services": {
     "deepseek": {
       "endpoint": "https://api.xiaomimimo.com/v1",
-      "key": "YOUR_API_KEY_HERE",
+      "key": "",
       "model": "mimo-v2-flash",
       "timeout": 60.0,
       "verify_ssl": true

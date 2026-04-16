@@ -4,7 +4,7 @@ Configuration management for Quick Translation app.
 import json
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 
 class Config:
@@ -25,7 +25,7 @@ class Config:
         "services": {
             "deepseek": {
                 "endpoint": "https://api.xiaomimimo.com/v1",
-                "key": "YOUR_API_KEY_HERE",
+                "key": os.environ.get("API_KEY", ""),
                 "model": "mimo-v2-flash",
                 "timeout": 60.0,
                 "verify_ssl": True
